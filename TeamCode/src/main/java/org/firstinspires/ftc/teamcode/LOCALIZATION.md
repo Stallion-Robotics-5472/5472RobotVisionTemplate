@@ -69,11 +69,18 @@ shifted position. Pick **one** of these (never both):
   `getBotpose_MT2()` is then already the robot-center pose. Keep
   `APPLY_CAMERA_OFFSET_IN_CODE = false`. This is best because MegaTag2 also uses
   the offset internally when solving.
-- **(B) In code** — Leave the Limelight UI offset at zero and set
-  `CAMERA_FORWARD_OFFSET_IN`, `CAMERA_LEFT_OFFSET_IN`, `CAMERA_YAW_OFFSET_DEG`
-  in `VisionConstants`, with `APPLY_CAMERA_OFFSET_IN_CODE = true`. The subsystem
-  then treats botpose as the camera's field pose and converts it to the
-  robot-center pose via `cameraPose.transformBy(ROBOT_TO_CAMERA.inverse())`.
+- **(B) In code (full 3D)** — Leave the Limelight UI offset at zero and set the
+  complete mount in `VisionConstants`: `CAMERA_FORWARD_OFFSET_IN`,
+  `CAMERA_LEFT_OFFSET_IN`, `CAMERA_UP_OFFSET_IN`, `CAMERA_ROLL_OFFSET_DEG`,
+  `CAMERA_PITCH_OFFSET_DEG`, `CAMERA_YAW_OFFSET_DEG`, with
+  `APPLY_CAMERA_OFFSET_IN_CODE = true`. `ROBOT_TO_CAMERA` is then a full 3D
+  (SE(3)) transform; the subsystem treats botpose as the camera's 3D field pose
+  and recovers the robot-center pose via
+  `cameraPose3d.transformBy(ROBOT_TO_CAMERA.inverse())`, then projects to 2D for
+  fusion. This correctly handles a raised, tilted (pitch), or rolled camera.
+  Note (A) is still the most accurate, because MegaTag2 also uses the mount
+  inside its own tag solve; (B) assumes botpose carries the true 3D camera pose
+  (cleanest with a level robot / MegaTag1).
 
 ## 3D pose (z, pitch, roll)
 

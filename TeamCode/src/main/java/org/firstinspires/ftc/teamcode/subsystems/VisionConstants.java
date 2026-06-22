@@ -12,9 +12,7 @@ package org.firstinspires.ftc.teamcode.subsystems;
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
 
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
-import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
-import org.firstinspires.ftc.teamcode.lib.geometry.Transform2d;
-import org.firstinspires.ftc.teamcode.lib.geometry.Translation2d;
+import org.firstinspires.ftc.teamcode.lib.geometry.Transform3d;
 
 public final class VisionConstants {
     private VisionConstants() {}
@@ -78,33 +76,34 @@ public final class VisionConstants {
     //
     // Do NOT do both, or the offset is applied twice.
     //
-    // IMPORTANT — the code-side offset (B) is PLANAR only: forward, left, and
-    // yaw. Camera HEIGHT (z), PITCH, and ROLL are intentionally NOT handled here
-    // because ROBOT_TO_CAMERA is a 2D transform. Those three only affect the 3D
-    // AprilTag solve, which runs inside the Limelight, not on the robot. If your
-    // camera is raised, tilted, or rolled (almost always the case), you MUST
-    // enter its full 3D pose in the Limelight UI (option A). Option B can only
-    // compensate the horizontal lever arm of a level, forward-facing camera.
+    // Option (B) now handles the FULL 3D mount: forward/left/up position and
+    // roll/pitch/yaw orientation. The Limelight's botpose is a 3D pose, so we
+    // recover the robot-center pose with a 3D (SE(3)) transform and then project
+    // to 2D for fusion. Option (A) is still the most accurate because MegaTag2
+    // also uses the offset inside its own tag solve; (B) assumes botpose carries
+    // the true 3D camera pose (best with a level robot / MegaTag1).
     // ---------------------------------------------------------------------
     public static final boolean APPLY_CAMERA_OFFSET_IN_CODE = false;
 
-    /** Camera position relative to robot center: +X = forward, +Y = left (inches). */
+    /** Camera position relative to robot center (inches): +X fwd, +Y left, +Z up. */
     public static final double CAMERA_FORWARD_OFFSET_IN = 6.0;
     public static final double CAMERA_LEFT_OFFSET_IN = 0.0;
-    /** Camera yaw relative to robot forward, CCW positive (degrees). */
+    public static final double CAMERA_UP_OFFSET_IN = 10.0;
+    /** Camera orientation relative to robot forward (degrees), CCW/right-hand. */
+    public static final double CAMERA_ROLL_OFFSET_DEG = 0.0;
+    public static final double CAMERA_PITCH_OFFSET_DEG = 0.0;  // + = tilted up
     public static final double CAMERA_YAW_OFFSET_DEG = 0.0;
-    // NOTE: height (z), pitch, and roll are configured in the Limelight UI, not
-    // here — see the IMPORTANT note above.
 
     /**
-     * Transform from the robot-center frame to the camera frame. Composing the
-     * robot pose with this yields the camera pose; the inverse converts a
-     * measured camera field pose back to the robot-center pose. Planar only
-     * (forward/left/yaw); height/pitch/roll live in the Limelight UI.
+     * Full 3D transform from the robot-center frame to the camera frame.
+     * Composing the robot pose with this yields the camera's field pose; the
+     * inverse converts a measured camera field pose back to the robot-center pose.
      */
-    public static final Transform2d ROBOT_TO_CAMERA = new Transform2d(
-            new Translation2d(CAMERA_FORWARD_OFFSET_IN, CAMERA_LEFT_OFFSET_IN),
-            Rotation2d.fromDegrees(CAMERA_YAW_OFFSET_DEG));
+    public static final Transform3d ROBOT_TO_CAMERA = new Transform3d(
+            CAMERA_FORWARD_OFFSET_IN, CAMERA_LEFT_OFFSET_IN, CAMERA_UP_OFFSET_IN,
+            Math.toRadians(CAMERA_ROLL_OFFSET_DEG),
+            Math.toRadians(CAMERA_PITCH_OFFSET_DEG),
+            Math.toRadians(CAMERA_YAW_OFFSET_DEG));
 
     // ---------------------------------------------------------------------
     // Kalman fusion tuning (std devs: {x in, y in, heading rad}).

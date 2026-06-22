@@ -30,7 +30,6 @@ import org.firstinspires.ftc.robotcore.external.navigation.Position;
 import org.firstinspires.ftc.teamcode.lib.estimator.PoseEstimator;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose3d;
-import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
 import org.firstinspires.ftc.teamcode.pathing.Localizer;
 
 public class Localization implements Localizer {
@@ -125,24 +124,29 @@ public class Localization implements Localizer {
 
         double headingRad = botpose.getOrientation().getYaw(AngleUnit.RADIANS);
 
-        // Capture the full 3D pose for diagnostics (z, pitch, roll). This uses the
-        // raw botpose, before the 2D camera-offset transform.
-        lastVisionPose3d = new Pose3d(
+        // The Limelight botpose is a full 3D pose. Build it as reported (this is
+        // the camera's field pose when the offset is configured in code, or the
+        // robot's field pose when configured in the Limelight UI).
+        Pose3d reportedPose3d = new Pose3d(
                 xIn, yIn, position.z,
                 botpose.getOrientation().getRoll(AngleUnit.RADIANS),
                 botpose.getOrientation().getPitch(AngleUnit.RADIANS),
                 headingRad);
+
+        // If the camera offset is handled in code, convert the camera's 3D field
+        // pose to the robot-center 3D pose with the inverse SE(3) transform
+        // (forward/left/up + roll/pitch/yaw). Otherwise botpose is already the
+        // robot pose. See VisionConstants for the two configuration options.
+        Pose3d robotPose3d = VisionConstants.APPLY_CAMERA_OFFSET_IN_CODE
+                ? reportedPose3d.transformBy(VisionConstants.ROBOT_TO_CAMERA.inverse())
+                : reportedPose3d;
+
+        // Keep the robot-center 3D pose for diagnostics (z, pitch, roll).
+        lastVisionPose3d = robotPose3d;
         lastVisionPose3dTimestamp = now;
 
-        Pose2d reportedPose = new Pose2d(xIn, yIn, new Rotation2d(headingRad));
-
-        // The Limelight is usually not at the robot's center. If the offset is
-        // configured in code (rather than the Limelight UI), botpose is the
-        // camera's field pose; convert it to the robot-center pose. See
-        // VisionConstants for the two configuration options.
-        Pose2d visionPose = VisionConstants.APPLY_CAMERA_OFFSET_IN_CODE
-                ? reportedPose.transformBy(VisionConstants.ROBOT_TO_CAMERA.inverse())
-                : reportedPose;
+        // The fused field estimate is 2D (the robot drives on the floor).
+        Pose2d visionPose = robotPose3d.toPose2d();
 
         // Off-field results are garbage (checked on the robot-center pose).
         double limit = VisionConstants.FIELD_HALF_SIZE_IN + VisionConstants.FIELD_MARGIN_IN;
