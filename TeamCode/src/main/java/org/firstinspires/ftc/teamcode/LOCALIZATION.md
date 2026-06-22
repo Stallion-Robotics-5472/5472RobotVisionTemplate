@@ -75,6 +75,23 @@ shifted position. Pick **one** of these (never both):
   then treats botpose as the camera's field pose and converts it to the
   robot-center pose via `cameraPose.transformBy(ROBOT_TO_CAMERA.inverse())`.
 
+## 3D pose (z, pitch, roll)
+
+The Limelight AprilTag botpose is fully 3D, but the fused estimate used for
+driving is 2D — the robot lives on the floor, and the Pinpoint only measures
+x/y/heading, so there is nothing meaningful to fuse z/pitch/roll against. The
+full 3D vision pose is still exposed for diagnostics via `Localization`:
+
+- `getVisionPose3d()` — the latest valid `Pose3d` (x, y, z, roll, pitch, yaw).
+- `getVisionZ()`, `getVisionPitch()`, `getVisionRoll()` — individual axes.
+- `getVisionPose3dAge(nowSeconds)` — how stale that 3D pose is.
+
+Typical uses: detect tipping (a pitch/roll spike), confirm the robot is on a
+ramp, or sanity-check the camera mount (a constant nonzero pitch/roll on a flat
+field usually means the camera-offset config is wrong). If you need a fused
+pitch/roll for control, add the Control Hub IMU as the source — the Pinpoint
+does not expose it.
+
 ## Tuning
 
 All knobs are in `VisionConstants`:

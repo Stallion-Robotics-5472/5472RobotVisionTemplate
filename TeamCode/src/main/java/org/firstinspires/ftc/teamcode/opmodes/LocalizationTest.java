@@ -45,6 +45,10 @@ public class LocalizationTest extends LinearOpMode {
             telemetry.addData("Vision status", localization.getLastVisionReject());
             telemetry.addData("Tags", localization.getLastTagCount());
             telemetry.addData("Avg tag dist", "%.2f", localization.getLastAvgTagDistance());
+            telemetry.addData("Vision 3D", "z %.1f  pitch %.1f  roll %.1f deg",
+                    localization.getVisionZ(),
+                    Math.toDegrees(localization.getVisionPitch()),
+                    Math.toDegrees(localization.getVisionRoll()));
             telemetry.update();
         }
 

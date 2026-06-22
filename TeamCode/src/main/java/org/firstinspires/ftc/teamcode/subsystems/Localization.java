@@ -29,6 +29,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
 import org.firstinspires.ftc.robotcore.external.navigation.Position;
 import org.firstinspires.ftc.teamcode.lib.estimator.PoseEstimator;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
+import org.firstinspires.ftc.teamcode.lib.geometry.Pose3d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
 import org.firstinspires.ftc.teamcode.pathing.Localizer;
 
@@ -43,6 +44,12 @@ public class Localization implements Localizer {
     private String lastVisionReject = "none";
     private int lastTagCount = 0;
     private double lastAvgTagDist = 0.0;
+
+    // Full 3D pose from the most recent valid vision frame. Only x/y/yaw are
+    // fused into the 2D estimate (the robot drives on the floor); z/pitch/roll
+    // are kept for diagnostics (tipping, ramps, mount sanity checks).
+    private Pose3d lastVisionPose3d = new Pose3d();
+    private double lastVisionPose3dTimestamp = Double.NEGATIVE_INFINITY;
 
     public Localization(HardwareMap hardwareMap) {
         odometry = new PinpointOdometry(hardwareMap);
@@ -117,6 +124,16 @@ public class Localization implements Localizer {
         }
 
         double headingRad = botpose.getOrientation().getYaw(AngleUnit.RADIANS);
+
+        // Capture the full 3D pose for diagnostics (z, pitch, roll). This uses the
+        // raw botpose, before the 2D camera-offset transform.
+        lastVisionPose3d = new Pose3d(
+                xIn, yIn, position.z,
+                botpose.getOrientation().getRoll(AngleUnit.RADIANS),
+                botpose.getOrientation().getPitch(AngleUnit.RADIANS),
+                headingRad);
+        lastVisionPose3dTimestamp = now;
+
         Pose2d reportedPose = new Pose2d(xIn, yIn, new Rotation2d(headingRad));
 
         // The Limelight is usually not at the robot's center. If the offset is
@@ -174,6 +191,34 @@ public class Localization implements Localizer {
 
     public double getLastAvgTagDistance() {
         return lastAvgTagDist;
+    }
+
+    /**
+     * Full 3D pose from the most recent valid vision frame (inches, radians).
+     * Only x/y/yaw drive the robot; z/pitch/roll are diagnostic. Check
+     * {@link #getVisionPose3dAge(double)} for freshness before trusting it.
+     */
+    public Pose3d getVisionPose3d() {
+        return lastVisionPose3d;
+    }
+
+    public double getVisionZ() {
+        return lastVisionPose3d.getZ();
+    }
+
+    /** Pitch in radians (nose up/down). ~0 on a flat field. */
+    public double getVisionPitch() {
+        return lastVisionPose3d.getPitch();
+    }
+
+    /** Roll in radians (lean left/right). ~0 on a flat field. */
+    public double getVisionRoll() {
+        return lastVisionPose3d.getRoll();
+    }
+
+    /** Seconds since the 3D vision pose was last updated (large if never/stale). */
+    public double getVisionPose3dAge(double nowSeconds) {
+        return nowSeconds - lastVisionPose3dTimestamp;
     }
 
     public PinpointOdometry getOdometry() {
