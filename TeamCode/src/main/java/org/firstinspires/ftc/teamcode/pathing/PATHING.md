@@ -71,8 +71,16 @@ convention matches the pose estimator: 144"×144", origin at center, +X right,
 +Y up, heading degrees CCW.
 
 To use it:
-- **Locally** — open `pathplanner.html` in any browser.
-- **From the robot's IP** — the file lives under `TeamCode/src/main/assets/`, so
-  it ships inside the app and can be served by the Robot Controller's embedded
-  web server (reachable at the robot's IP). Wiring up that web handler is
-  optional and not enabled by default.
+- **From the robot's IP** — `PathPlannerServer` registers a route on the Robot
+  Controller's embedded web server, so after deploying the app you can connect
+  to the robot's Wi-Fi and browse to:
+
+  ```
+  http://192.168.43.1:8080/pathplanner
+  ```
+
+  (Use the robot's actual IP; `192.168.43.1` is the typical Control Hub address.)
+  This relies on SDK web-server internals, so confirm it once on hardware after
+  the first deploy.
+- **Locally** — you can also just open `assets/pathplanner.html` in any browser;
+  it has no server dependency.
