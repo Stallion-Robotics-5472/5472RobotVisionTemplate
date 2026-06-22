@@ -23,7 +23,7 @@ public final class VisionConstants {
     // without a Limelight plugged in, or to A/B test fusion vs. dead reckoning.
     // Can also be toggled at runtime via Localization.setVisionEnabled(...).
     // ---------------------------------------------------------------------
-    public static final boolean VISION_ENABLED = true;
+    public static final boolean VISION_ENABLED = false;
 
     // ---------------------------------------------------------------------
     // Hardware-map device names. These must match your robot configuration.
@@ -45,9 +45,9 @@ public final class VisionConstants {
      * The sample defaults below are for goBILDA's reference build; measure and
      * replace them for your robot.
      */
-    public static final double PINPOINT_X_OFFSET_MM = -84.0;
-    public static final double PINPOINT_Y_OFFSET_MM = -168.0;
-    public static final DistanceUnit PINPOINT_OFFSET_UNIT = DistanceUnit.MM;
+    public static final double PINPOINT_X_OFFSET_MM = -3.125;
+    public static final double PINPOINT_Y_OFFSET_MM = 3.375;
+    public static final DistanceUnit PINPOINT_OFFSET_UNIT = DistanceUnit.INCH;
 
     /** Pod type. Use goBILDA_SWINGARM_POD or goBILDA_4_BAR_POD for goBILDA pods. */
     public static final GoBildaPinpointDriver.GoBildaOdometryPods PINPOINT_POD_TYPE =
@@ -55,9 +55,9 @@ public final class VisionConstants {
 
     /** Direction each pod counts. Flip these if a pod reads backwards. */
     public static final GoBildaPinpointDriver.EncoderDirection PINPOINT_X_DIRECTION =
-            GoBildaPinpointDriver.EncoderDirection.FORWARD;
+            GoBildaPinpointDriver.EncoderDirection.REVERSED;
     public static final GoBildaPinpointDriver.EncoderDirection PINPOINT_Y_DIRECTION =
-            GoBildaPinpointDriver.EncoderDirection.FORWARD;
+            GoBildaPinpointDriver.EncoderDirection.REVERSED;
 
     // ---------------------------------------------------------------------
     // Limelight 3A configuration.
