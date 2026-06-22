@@ -19,9 +19,12 @@ is blended in as an absolute measurement weighted by standard deviations.
 3. **Dynamic std devs (AdvantageKit style)** — Vision XY std dev scales with
    `avgTagDistance² / tagCount`. Close, multi-tag fixes snap the pose; far-away
    or single-tag fixes barely move it.
-4. **MegaTag2** — We feed the robot heading to the Limelight each loop
-   (`updateRobotOrientation`) and read `getBotpose_MT2()`. Heading is taken from
-   the gyro, not vision, so vision is given a huge heading std dev (gain ~0).
+4. **MegaTag2, heading from gyro only** — We feed the Pinpoint gyro heading to
+   the Limelight each loop (`updateRobotOrientation`) and read
+   `getBotpose_MT2()`. Vision is used for x/y *only*: each vision measurement's
+   rotation is built from the gyro, and `getPose()` reports the gyro heading
+   directly, so heading is instantaneous from the IMU and the camera can never
+   move it (the huge vision heading std dev is just a backstop).
 5. **Latency compensation** — Each frame is timestamped at *capture* time
    (`now − captureLatency − targetingLatency`). The estimator looks up where
    odometry was at that instant, applies the correction there, then replays

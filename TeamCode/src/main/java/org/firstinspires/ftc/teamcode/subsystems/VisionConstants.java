@@ -137,9 +137,11 @@ public final class VisionConstants {
     public static final double VISION_XY_STD_DEV_COEFFICIENT = 2.0;
 
     /**
-     * Heading std dev (radians) for vision. We use MegaTag2, whose heading comes
-     * from the gyro we feed in, so vision should NOT move heading. A very large
-     * value drives the heading Kalman gain to ~0.
+     * Heading std dev (radians) for vision. Heading is taken directly from the
+     * Pinpoint gyro: Localization builds each vision measurement's rotation from
+     * the gyro and reports the gyro heading in getPose(), so the camera never
+     * moves heading. This large value is belt-and-suspenders (drives the heading
+     * Kalman gain to ~0) in case a measurement ever carries a camera yaw.
      */
     public static final double VISION_HEADING_STD_DEV = 9999.0;
 
