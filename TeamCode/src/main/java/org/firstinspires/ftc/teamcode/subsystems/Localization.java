@@ -30,8 +30,9 @@ import org.firstinspires.ftc.robotcore.external.navigation.Position;
 import org.firstinspires.ftc.teamcode.lib.estimator.PoseEstimator;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
+import org.firstinspires.ftc.teamcode.pathing.Localizer;
 
-public class Localization {
+public class Localization implements Localizer {
     private final PinpointOdometry odometry;
     private final LimelightVision vision;
     private final PoseEstimator poseEstimator;
