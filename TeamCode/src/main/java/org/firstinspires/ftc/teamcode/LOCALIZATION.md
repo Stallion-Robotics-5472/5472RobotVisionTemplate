@@ -59,6 +59,21 @@ is blended in as an absolute measurement weighted by standard deviations.
    (±72"). Make sure your `setStartingPose` and any field bounds use the same
    frame.
 
+## Disabling vision (odometry-only)
+
+To run without the Limelight — no camera plugged in, or to compare fusion
+against dead reckoning — disable it any of these ways:
+
+- **Globally:** set `VisionConstants.VISION_ENABLED = false`. The Limelight is
+  then never initialized (so a missing/unplugged camera won't crash the OpMode)
+  and `Localization` runs on the Pinpoint alone.
+- **Per OpMode:** construct with `new Localization(hardwareMap, false)`.
+- **At runtime:** call `localization.setVisionEnabled(false)` (only effective if
+  the Limelight was initialized; check `isVisionEnabled()`).
+
+In odometry-only mode everything else (path following, etc.) works unchanged —
+the fused pose is simply the Pinpoint pose.
+
 ## Camera offset (Limelight not at robot center)
 
 The Limelight is rarely mounted at the robot's center, and that lever arm

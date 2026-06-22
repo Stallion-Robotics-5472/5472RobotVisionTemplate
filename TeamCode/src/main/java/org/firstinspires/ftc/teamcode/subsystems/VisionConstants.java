@@ -18,6 +18,14 @@ public final class VisionConstants {
     private VisionConstants() {}
 
     // ---------------------------------------------------------------------
+    // Master switch for vision. When false, Localization never initializes the
+    // Limelight and runs on the Pinpoint alone (odometry-only). Use this to run
+    // without a Limelight plugged in, or to A/B test fusion vs. dead reckoning.
+    // Can also be toggled at runtime via Localization.setVisionEnabled(...).
+    // ---------------------------------------------------------------------
+    public static final boolean VISION_ENABLED = true;
+
+    // ---------------------------------------------------------------------
     // Hardware-map device names. These must match your robot configuration.
     // ---------------------------------------------------------------------
     public static final String PINPOINT_NAME = "pinpoint";

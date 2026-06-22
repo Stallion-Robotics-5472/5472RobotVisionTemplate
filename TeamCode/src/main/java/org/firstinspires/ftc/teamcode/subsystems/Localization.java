@@ -34,8 +34,13 @@ import org.firstinspires.ftc.teamcode.pathing.Localizer;
 
 public class Localization implements Localizer {
     private final PinpointOdometry odometry;
+    /** Null when vision is disabled at construction (odometry-only mode). */
     private final LimelightVision vision;
     private final PoseEstimator poseEstimator;
+
+    // Runtime gate for vision fusion. Starts from VisionConstants.VISION_ENABLED
+    // but can be toggled live (only effective if the Limelight was initialized).
+    private boolean visionEnabled;
 
     // Telemetry / debugging state from the most recent update.
     private Pose2d lastOdometryPose = new Pose2d();
@@ -51,8 +56,18 @@ public class Localization implements Localizer {
     private double lastVisionPose3dTimestamp = Double.NEGATIVE_INFINITY;
 
     public Localization(HardwareMap hardwareMap) {
+        this(hardwareMap, VisionConstants.VISION_ENABLED);
+    }
+
+    /**
+     * @param enableVision if false, the Limelight is never initialized and the
+     *     estimate runs on the Pinpoint alone. Use this for odometry-only runs
+     *     or when no Limelight is plugged in (avoids a missing-hardware crash).
+     */
+    public Localization(HardwareMap hardwareMap, boolean enableVision) {
         odometry = new PinpointOdometry(hardwareMap);
-        vision = new LimelightVision(hardwareMap);
+        vision = enableVision ? new LimelightVision(hardwareMap) : null;
+        visionEnabled = enableVision;
         poseEstimator = new PoseEstimator(
                 VisionConstants.ODOMETRY_STD_DEVS,
                 VisionConstants.DEFAULT_VISION_STD_DEVS);
@@ -77,12 +92,31 @@ public class Localization implements Localizer {
         lastOdometryPose = odometry.getPose();
         poseEstimator.updateWithTime(now, lastOdometryPose);
 
+        // Vision disabled (or no Limelight): odometry-only, skip the rest.
+        if (!visionEnabled || vision == null) {
+            lastVisionAccepted = false;
+            lastVisionReject = "vision disabled";
+            return;
+        }
+
         // 2) Hand the camera our best heading so MegaTag2 can localize.
         double headingDegrees = poseEstimator.getEstimatedPosition().getRotation().getDegrees();
         vision.updateRobotOrientation(headingDegrees);
 
         // 3) Vision: validate and, if good, fuse it.
         processVision(vision.getLatestResult(), now);
+    }
+
+    /**
+     * Enables or disables vision fusion at runtime. Has no effect if the
+     * Limelight was not initialized (constructed with vision disabled).
+     */
+    public void setVisionEnabled(boolean enabled) {
+        this.visionEnabled = enabled && vision != null;
+    }
+
+    public boolean isVisionEnabled() {
+        return visionEnabled && vision != null;
     }
 
     private void processVision(LLResult result, double now) {
@@ -229,13 +263,16 @@ public class Localization implements Localizer {
         return odometry;
     }
 
+    /** The Limelight wrapper, or null if vision was disabled at construction. */
     public LimelightVision getVision() {
         return vision;
     }
 
-    /** Stops the Limelight polling thread. Call when the OpMode ends. */
+    /** Stops the Limelight polling thread (if any). Call when the OpMode ends. */
     public void stop() {
-        vision.stop();
+        if (vision != null) {
+            vision.stop();
+        }
     }
 
     /** Monotonic clock shared by odometry samples and vision timestamps. */

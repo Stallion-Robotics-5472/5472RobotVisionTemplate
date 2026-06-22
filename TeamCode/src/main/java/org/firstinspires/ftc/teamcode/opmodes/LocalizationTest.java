@@ -41,6 +41,7 @@ public class LocalizationTest extends LinearOpMode {
                     fused.getX(), fused.getY(), fused.getRotation().getDegrees());
             telemetry.addData("Odometry", "x %.1f  y %.1f  h %.1f deg",
                     odo.getX(), odo.getY(), odo.getRotation().getDegrees());
+            telemetry.addData("Vision enabled", localization.isVisionEnabled());
             telemetry.addData("Vision accepted", localization.wasLastVisionAccepted());
             telemetry.addData("Vision status", localization.getLastVisionReject());
             telemetry.addData("Tags", localization.getLastTagCount());
