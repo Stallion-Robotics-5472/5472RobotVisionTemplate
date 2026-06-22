@@ -77,6 +77,14 @@ public final class VisionConstants {
     //       Set APPLY_CAMERA_OFFSET_IN_CODE = true.
     //
     // Do NOT do both, or the offset is applied twice.
+    //
+    // IMPORTANT — the code-side offset (B) is PLANAR only: forward, left, and
+    // yaw. Camera HEIGHT (z), PITCH, and ROLL are intentionally NOT handled here
+    // because ROBOT_TO_CAMERA is a 2D transform. Those three only affect the 3D
+    // AprilTag solve, which runs inside the Limelight, not on the robot. If your
+    // camera is raised, tilted, or rolled (almost always the case), you MUST
+    // enter its full 3D pose in the Limelight UI (option A). Option B can only
+    // compensate the horizontal lever arm of a level, forward-facing camera.
     // ---------------------------------------------------------------------
     public static final boolean APPLY_CAMERA_OFFSET_IN_CODE = false;
 
@@ -85,11 +93,14 @@ public final class VisionConstants {
     public static final double CAMERA_LEFT_OFFSET_IN = 0.0;
     /** Camera yaw relative to robot forward, CCW positive (degrees). */
     public static final double CAMERA_YAW_OFFSET_DEG = 0.0;
+    // NOTE: height (z), pitch, and roll are configured in the Limelight UI, not
+    // here — see the IMPORTANT note above.
 
     /**
      * Transform from the robot-center frame to the camera frame. Composing the
      * robot pose with this yields the camera pose; the inverse converts a
-     * measured camera field pose back to the robot-center pose.
+     * measured camera field pose back to the robot-center pose. Planar only
+     * (forward/left/yaw); height/pitch/roll live in the Limelight UI.
      */
     public static final Transform2d ROBOT_TO_CAMERA = new Transform2d(
             new Translation2d(CAMERA_FORWARD_OFFSET_IN, CAMERA_LEFT_OFFSET_IN),
