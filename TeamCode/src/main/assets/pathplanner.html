@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<!--
+  Path Planner — an original, self-contained visual editor for building
+  PathChains for this template's follower. Drag control points on the field,
+  choose a heading rule per segment, and copy the generated Java code that uses
+  BezierCurve / Path / PathChain.
+
+  No external libraries. Open this file directly in a browser, or serve it from
+  the robot (see LOCALIZATION/PATHING docs) to reach it at the robot's IP.
+
+  Field convention matches the pose estimator: 144" x 144", origin at center,
+  +X to the right, +Y up, heading in degrees CCW from +X.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FTC Path Planner</title>
+<style>
+  :root { --bg:#11151c; --panel:#1b2230; --ink:#e7edf5; --muted:#8aa0b6; --accent:#3fa7ff; --line:#2a3547; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         background:var(--bg); color:var(--ink); display:flex; min-height:100vh; }
+  #left { padding:16px; }
+  canvas { background:#0c0f14; border:1px solid var(--line); border-radius:8px; touch-action:none; }
+  #right { flex:1; padding:16px; min-width:320px; max-width:560px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:12px; margin-bottom:12px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
+  .row { display:flex; gap:8px; align-items:center; margin:6px 0; flex-wrap:wrap; }
+  label { color:var(--muted); font-size:12px; }
+  input, select, button { background:#0c0f14; color:var(--ink); border:1px solid var(--line);
+          border-radius:6px; padding:6px 8px; font-size:13px; }
+  input[type=number] { width:78px; }
+  button { cursor:pointer; }
+  button.accent { background:var(--accent); color:#04121f; border-color:var(--accent); font-weight:600; }
+  button:hover { border-color:var(--accent); }
+  .pathItem { border:1px solid var(--line); border-radius:6px; padding:8px; margin:8px 0; }
+  .pathItem.sel { border-color:var(--accent); }
+  .pathHead { display:flex; justify-content:space-between; align-items:center; }
+  .pill { font-size:11px; color:var(--muted); }
+  textarea { width:100%; height:240px; background:#0c0f14; color:var(--ink); border:1px solid var(--line);
+             border-radius:6px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size:12px; padding:8px; }
+  .hint { color:var(--muted); font-size:12px; line-height:1.5; }
+  .tag { display:inline-block; background:#0c0f14; border:1px solid var(--line); border-radius:4px;
+         padding:1px 6px; font-size:11px; color:var(--muted); }
+</style>
+</head>
+<body>
+<div id="left">
+  <canvas id="field" width="720" height="720"></canvas>
+  <div class="hint" style="margin-top:8px; max-width:720px;">
+    Click empty field to add a control point to the selected path · drag points to move ·
+    double-click a point to delete it · readout below is in field inches.
+    <div id="readout" class="tag" style="margin-top:6px;">cursor: —</div>
+  </div>
+</div>
+
+<div id="right">
+  <h1>FTC Path Planner</h1>
+  <div class="sub">Builds a <span class="tag">PathChain</span> for the template follower. Field origin = center, +X right, +Y up, heading° CCW.</div>
+
+  <div class="card">
+    <div class="row">
+      <label>Start pose</label>
+      x <input id="startX" type="number" value="0" step="0.5">
+      y <input id="startY" type="number" value="0" step="0.5">
+      heading° <input id="startH" type="number" value="0" step="1">
+    </div>
+    <div class="row">
+      <button class="accent" id="addPath">+ Add path</button>
+      <button id="clearAll">Clear all</button>
+      <span class="pill">Each new path starts where the previous one ends.</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="pathList"></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;">
+      <strong style="font-size:14px;">Generated Java</strong>
+      <div class="row">
+        <button id="copyBtn">Copy</button>
+        <button id="saveBtn">Save</button>
+        <button id="loadBtn">Load</button>
+      </div>
+    </div>
+    <textarea id="code" readonly spellcheck="false"></textarea>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ---------- model ----------
+// Each path: { points: [{x,y}...], heading: {mode, a, b} }
+//   mode: "tangent" | "reverse" | "linear" | "constant"
+//   linear uses a=start°, b=end°; constant uses a=°; tangent/reverse ignore a,b.
+const state = {
+  start: { x: 0, y: 0, h: 0 },
+  paths: [],
+  selected: 0,
+};
+
+const FIELD = 144;          // inches
+const HALF = FIELD / 2;     // 72
+const canvas = document.getElementById("field");
+const ctx = canvas.getContext("2d");
+const SCALE = canvas.width / FIELD;   // px per inch
+
+function toCanvas(p) { return { x: (p.x + HALF) * SCALE, y: (HALF - p.y) * SCALE }; }
+function toField(cx, cy) { return { x: cx / SCALE - HALF, y: HALF - cy / SCALE }; }
+function round1(v) { return Math.round(v * 10) / 10; }
+
+// ---------- bezier (De Casteljau) ----------
+function bezierPoint(points, t) {
+  let pts = points.map(p => ({ x: p.x, y: p.y }));
+  while (pts.length > 1) {
+    const next = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      next.push({ x: pts[i].x + (pts[i + 1].x - pts[i].x) * t,
+                  y: pts[i].y + (pts[i + 1].y - pts[i].y) * t });
+    }
+    pts = next;
+  }
+  return pts[0];
+}
+function bezierTangent(points, t) {
+  const n = points.length - 1;
+  if (n < 1) return { x: 1, y: 0 };
+  const d = [];
+  for (let i = 0; i < n; i++) d.push({ x: n * (points[i + 1].x - points[i].x), y: n * (points[i + 1].y - points[i].y) });
+  if (d.length === 1) return d[0];
+  return bezierPoint(d, t);
+}
+function shortest(deg) { let d = ((deg + 180) % 360 + 360) % 360 - 180; return d; }
+
+// heading (degrees) along a path at parameter t
+function headingAt(path, t) {
+  const h = path.heading;
+  if (h.mode === "constant") return h.a;
+  if (h.mode === "linear") return h.a + shortest(h.b - h.a) * t;
+  const tan = bezierTangent(path.points, t);
+  let deg = Math.atan2(tan.y, tan.x) * 180 / Math.PI;
+  if (h.mode === "reverse") deg += 180;
+  return shortest(deg);
+}
+
+// ---------- drawing ----------
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // grid every 24"
+  ctx.strokeStyle = "#1c2533"; ctx.lineWidth = 1;
+  for (let i = -HALF; i <= HALF; i += 24) {
+    const a = toCanvas({ x: i, y: -HALF }), b = toCanvas({ x: i, y: HALF });
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    const c = toCanvas({ x: -HALF, y: i }), d = toCanvas({ x: HALF, y: i });
+    ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.stroke();
+  }
+  // axes
+  ctx.strokeStyle = "#33445a"; ctx.lineWidth = 1.5;
+  const o = toCanvas({ x: 0, y: 0 });
+  ctx.beginPath(); ctx.moveTo(o.x, 0); ctx.lineTo(o.x, canvas.height); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, o.y); ctx.lineTo(canvas.width, o.y); ctx.stroke();
+
+  // start pose marker
+  drawRobot(state.start.x, state.start.y, state.start.h, "#2ecc71");
+
+  // paths
+  state.paths.forEach((path, pi) => {
+    const sel = pi === state.selected;
+    if (path.points.length >= 2) {
+      ctx.strokeStyle = sel ? "#3fa7ff" : "#5d6b7e"; ctx.lineWidth = sel ? 3 : 2;
+      ctx.beginPath();
+      for (let s = 0; s <= 100; s++) {
+        const p = toCanvas(bezierPoint(path.points, s / 100));
+        if (s === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+      // heading arrows along the path
+      ctx.strokeStyle = sel ? "#9fd0ff" : "#46535f";
+      for (let s = 0; s <= 10; s++) {
+        const t = s / 10;
+        const base = toCanvas(bezierPoint(path.points, t));
+        const deg = headingAt(path, t) * Math.PI / 180;
+        ctx.beginPath(); ctx.moveTo(base.x, base.y);
+        ctx.lineTo(base.x + Math.cos(deg) * 14, base.y - Math.sin(deg) * 14); ctx.stroke();
+      }
+    }
+    // control polygon + handles
+    ctx.strokeStyle = "#2a3547"; ctx.setLineDash([4, 4]); ctx.beginPath();
+    path.points.forEach((p, i) => { const c = toCanvas(p); if (i === 0) ctx.moveTo(c.x, c.y); else ctx.lineTo(c.x, c.y); });
+    ctx.stroke(); ctx.setLineDash([]);
+    path.points.forEach((p, i) => {
+      const c = toCanvas(p);
+      const endpoint = i === 0 || i === path.points.length - 1;
+      ctx.fillStyle = sel ? (endpoint ? "#3fa7ff" : "#cfe6ff") : "#7c8a9b";
+      ctx.beginPath(); ctx.arc(c.x, c.y, endpoint ? 7 : 5, 0, Math.PI * 2); ctx.fill();
+    });
+  });
+}
+function drawRobot(x, y, hDeg, color) {
+  const c = toCanvas({ x, y }); const h = hDeg * Math.PI / 180;
+  ctx.fillStyle = color; ctx.beginPath(); ctx.arc(c.x, c.y, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = color; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(c.x + Math.cos(h) * 18, c.y - Math.sin(h) * 18); ctx.stroke();
+}
+
+// ---------- interaction ----------
+let drag = null; // {pi, i}
+function hitTest(cx, cy) {
+  const path = state.paths[state.selected];
+  if (!path) return null;
+  for (let i = 0; i < path.points.length; i++) {
+    const c = toCanvas(path.points[i]);
+    if (Math.hypot(c.x - cx, c.y - cy) <= 9) return { pi: state.selected, i };
+  }
+  return null;
+}
+function canvasXY(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * (canvas.width / r.width),
+           y: (e.clientY - r.top) * (canvas.height / r.height) };
+}
+canvas.addEventListener("pointerdown", e => {
+  const { x, y } = canvasXY(e);
+  const hit = hitTest(x, y);
+  if (hit) { drag = hit; canvas.setPointerCapture(e.pointerId); return; }
+  const path = state.paths[state.selected];
+  if (!path) return;
+  const f = toField(x, y);
+  path.points.push({ x: round1(f.x), y: round1(f.y) });
+  sync();
+});
+canvas.addEventListener("pointermove", e => {
+  const { x, y } = canvasXY(e);
+  const f = toField(x, y);
+  document.getElementById("readout").textContent = `cursor: x ${round1(f.x)}, y ${round1(f.y)}`;
+  if (drag) {
+    state.paths[drag.pi].points[drag.i] = { x: round1(f.x), y: round1(f.y) };
+    sync();
+  }
+});
+canvas.addEventListener("pointerup", () => { drag = null; });
+canvas.addEventListener("dblclick", e => {
+  const { x, y } = canvasXY(e);
+  const hit = hitTest(x, y);
+  if (hit) { state.paths[hit.pi].points.splice(hit.i, 1); sync(); }
+});
+
+// ---------- path list UI ----------
+function lastEndpoint() {
+  for (let i = state.paths.length - 1; i >= 0; i--) {
+    const pts = state.paths[i].points;
+    if (pts.length) return pts[pts.length - 1];
+  }
+  return { x: state.start.x, y: state.start.y };
+}
+function addPath() {
+  const startPt = lastEndpoint();
+  state.paths.push({
+    points: [{ x: startPt.x, y: startPt.y }],
+    heading: { mode: "tangent", a: 0, b: 0 },
+  });
+  state.selected = state.paths.length - 1;
+  sync();
+}
+function renderList() {
+  const list = document.getElementById("pathList");
+  list.innerHTML = "";
+  if (!state.paths.length) { list.innerHTML = '<span class="hint">No paths yet. Click “Add path”.</span>'; return; }
+  state.paths.forEach((path, pi) => {
+    const div = document.createElement("div");
+    div.className = "pathItem" + (pi === state.selected ? " sel" : "");
+    const modes = ["tangent", "reverse", "linear", "constant"]
+      .map(m => `<option value="${m}" ${path.heading.mode === m ? "selected" : ""}>${m}</option>`).join("");
+    const needA = path.heading.mode === "linear" || path.heading.mode === "constant";
+    const needB = path.heading.mode === "linear";
+    div.innerHTML = `
+      <div class="pathHead">
+        <strong>Path ${pi}</strong>
+        <span class="pill">${path.points.length} pts</span>
+      </div>
+      <div class="row">
+        <label>heading</label>
+        <select data-act="mode" data-pi="${pi}">${modes}</select>
+        ${needA ? `<label>${path.heading.mode === "linear" ? "start°" : "°"}</label><input type="number" data-act="a" data-pi="${pi}" value="${path.heading.a}">` : ""}
+        ${needB ? `<label>end°</label><input type="number" data-act="b" data-pi="${pi}" value="${path.heading.b}">` : ""}
+      </div>
+      <div class="row">
+        <button data-act="select" data-pi="${pi}">Select</button>
+        <button data-act="delete" data-pi="${pi}">Delete</button>
+      </div>`;
+    list.appendChild(div);
+  });
+  list.querySelectorAll("[data-act]").forEach(el => {
+    const pi = +el.dataset.pi, act = el.dataset.act;
+    if (el.tagName === "SELECT") el.addEventListener("change", () => { state.paths[pi].heading.mode = el.value; sync(); });
+    else if (el.tagName === "INPUT") el.addEventListener("input", () => { state.paths[pi].heading[act] = parseFloat(el.value) || 0; sync(); });
+    else el.addEventListener("click", () => {
+      if (act === "select") state.selected = pi;
+      else if (act === "delete") { state.paths.splice(pi, 1); state.selected = Math.max(0, state.selected - (pi <= state.selected ? 1 : 0)); }
+      sync();
+    });
+  });
+}
+
+// ---------- java codegen ----------
+function fmt(v) { return Number.isInteger(v) ? v.toFixed(1) : String(v); }
+function genJava() {
+  const validPaths = state.paths.filter(p => p.points.length >= 2);
+  const lines = [];
+  lines.push(`// Auto-generated by Path Planner. Field inches, heading degrees CCW.`);
+  lines.push(`localization.setStartingPose(new Pose2d(${fmt(state.start.x)}, ${fmt(state.start.y)}, ` +
+             `Rotation2d.fromDegrees(${fmt(state.start.h)})));`);
+  lines.push("");
+  validPaths.forEach((path, idx) => {
+    const cps = path.points.map(p => `        new Translation2d(${fmt(p.x)}, ${fmt(p.y)})`).join(",\n");
+    let headingCall;
+    switch (path.heading.mode) {
+      case "constant": headingCall = `.setConstantHeading(Math.toRadians(${fmt(path.heading.a)}))`; break;
+      case "linear":   headingCall = `.setLinearHeading(Math.toRadians(${fmt(path.heading.a)}), Math.toRadians(${fmt(path.heading.b)}))`; break;
+      case "reverse":  headingCall = `.setReverseTangentHeading()`; break;
+      default:         headingCall = `.setTangentHeading()`;
+    }
+    lines.push(`Path path${idx} = new Path(new BezierCurve(`);
+    lines.push(cps + "))");
+    lines.push(`        ${headingCall};`);
+  });
+  lines.push("");
+  if (validPaths.length) {
+    const names = validPaths.map((_, i) => `path${i}`).join(", ");
+    lines.push(`PathChain chain = new PathChain(${names});`);
+    lines.push(`follower.followPath(chain);`);
+  } else {
+    lines.push(`// Add at least one path with 2+ control points.`);
+  }
+  return lines.join("\n");
+}
+
+// ---------- glue ----------
+function sync() {
+  state.start.x = parseFloat(document.getElementById("startX").value) || 0;
+  state.start.y = parseFloat(document.getElementById("startY").value) || 0;
+  state.start.h = parseFloat(document.getElementById("startH").value) || 0;
+  renderList();
+  draw();
+  document.getElementById("code").value = genJava();
+}
+document.getElementById("addPath").addEventListener("click", addPath);
+document.getElementById("clearAll").addEventListener("click", () => { state.paths = []; state.selected = 0; sync(); });
+["startX", "startY", "startH"].forEach(id => document.getElementById(id).addEventListener("input", sync));
+document.getElementById("copyBtn").addEventListener("click", () => {
+  navigator.clipboard && navigator.clipboard.writeText(document.getElementById("code").value);
+});
+document.getElementById("saveBtn").addEventListener("click", () => {
+  localStorage.setItem("ftcPathPlanner", JSON.stringify(state));
+});
+document.getElementById("loadBtn").addEventListener("click", () => {
+  const raw = localStorage.getItem("ftcPathPlanner");
+  if (!raw) return;
+  const loaded = JSON.parse(raw);
+  state.start = loaded.start; state.paths = loaded.paths; state.selected = loaded.selected || 0;
+  document.getElementById("startX").value = state.start.x;
+  document.getElementById("startY").value = state.start.y;
+  document.getElementById("startH").value = state.start.h;
+  sync();
+});
+
+sync();
+</script>
+</body>
+</html>
