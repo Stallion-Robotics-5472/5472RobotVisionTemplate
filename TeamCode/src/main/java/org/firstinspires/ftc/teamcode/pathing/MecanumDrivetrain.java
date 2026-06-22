@@ -37,8 +37,7 @@ public class MecanumDrivetrain implements Drivetrain {
 
     @Override
     public void driveFieldCentric(double fieldXPower, double fieldYPower, double turnPower,
-                                  Rotation2d robotHeading) {
-        double cos = robotHeading.getCos();
+                                  Rotation2d robotHeading) {        double cos = robotHeading.getCos();
         double sin = robotHeading.getSin();
 
         // Rotate the field vector into the robot frame.
@@ -59,6 +58,16 @@ public class MecanumDrivetrain implements Drivetrain {
         frontRight.setPower(frPower / max);
         backRight.setPower(brPower / max);
         backLeft.setPower(blPower / max);
+    }
+
+    /**
+     * Robot-centric drive for manual TeleOp. Inputs are in the robot's own
+     * frame: +forward, +strafeLeft, +turn is counter-clockwise. Delegates to
+     * {@link #driveFieldCentric} with a zero heading, so it reuses the exact
+     * same wheel mixing and normalization (no separate drivetrain logic).
+     */
+    public void driveRobotCentric(double forward, double strafeLeft, double turn) {
+        driveFieldCentric(forward, strafeLeft, turn, new Rotation2d());
     }
 
     @Override
