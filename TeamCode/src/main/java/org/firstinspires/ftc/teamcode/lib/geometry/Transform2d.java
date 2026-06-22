@@ -48,6 +48,18 @@ public class Transform2d {
         return m_translation.getY();
     }
 
+    /**
+     * Returns the inverse transform. If this maps frame A to frame B, the
+     * inverse maps B back to A. Used to convert a camera's field pose into the
+     * robot's field pose when the camera is not at the robot's center.
+     */
+    public Transform2d inverse() {
+        // Rotate the negated translation into the inverse frame.
+        return new Transform2d(
+                m_translation.unaryMinus().rotateBy(m_rotation.unaryMinus()),
+                m_rotation.unaryMinus());
+    }
+
     @Override
     public String toString() {
         return String.format("Transform2d(%s, %s)", m_translation, m_rotation);

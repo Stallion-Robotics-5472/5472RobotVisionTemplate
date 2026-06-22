@@ -108,21 +108,30 @@ public class Localization {
         double xIn = position.x;
         double yIn = position.y;
 
-        // MegaTag2 reports the origin when it has no real fix.
+        // MegaTag2 reports the origin when it has no real fix. Check the raw
+        // botpose here, before any camera-offset transform shifts it away from 0.
         if (xIn == 0.0 && yIn == 0.0) {
             lastVisionReject = "origin (no fix)";
             return;
         }
 
-        // Off-field results are garbage.
+        double headingRad = botpose.getOrientation().getYaw(AngleUnit.RADIANS);
+        Pose2d reportedPose = new Pose2d(xIn, yIn, new Rotation2d(headingRad));
+
+        // The Limelight is usually not at the robot's center. If the offset is
+        // configured in code (rather than the Limelight UI), botpose is the
+        // camera's field pose; convert it to the robot-center pose. See
+        // VisionConstants for the two configuration options.
+        Pose2d visionPose = VisionConstants.APPLY_CAMERA_OFFSET_IN_CODE
+                ? reportedPose.transformBy(VisionConstants.ROBOT_TO_CAMERA.inverse())
+                : reportedPose;
+
+        // Off-field results are garbage (checked on the robot-center pose).
         double limit = VisionConstants.FIELD_HALF_SIZE_IN + VisionConstants.FIELD_MARGIN_IN;
-        if (Math.abs(xIn) > limit || Math.abs(yIn) > limit) {
+        if (Math.abs(visionPose.getX()) > limit || Math.abs(visionPose.getY()) > limit) {
             lastVisionReject = "off field";
             return;
         }
-
-        double headingRad = botpose.getOrientation().getYaw(AngleUnit.RADIANS);
-        Pose2d visionPose = new Pose2d(xIn, yIn, new Rotation2d(headingRad));
 
         // Dynamic std devs (AdvantageKit style): trust scales with distance^2 / tagCount.
         lastAvgTagDist = result.getBotposeAvgDist();

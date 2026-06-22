@@ -59,6 +59,22 @@ is blended in as an absolute measurement weighted by standard deviations.
    (±72"). Make sure your `setStartingPose` and any field bounds use the same
    frame.
 
+## Camera offset (Limelight not at robot center)
+
+The Limelight is rarely mounted at the robot's center, and that lever arm
+matters: when the robot rotates, an off-center camera sees the field from a
+shifted position. Pick **one** of these (never both):
+
+- **(A) Recommended** — Enter the camera→robot offset in the Limelight web UI.
+  `getBotpose_MT2()` is then already the robot-center pose. Keep
+  `APPLY_CAMERA_OFFSET_IN_CODE = false`. This is best because MegaTag2 also uses
+  the offset internally when solving.
+- **(B) In code** — Leave the Limelight UI offset at zero and set
+  `CAMERA_FORWARD_OFFSET_IN`, `CAMERA_LEFT_OFFSET_IN`, `CAMERA_YAW_OFFSET_DEG`
+  in `VisionConstants`, with `APPLY_CAMERA_OFFSET_IN_CODE = true`. The subsystem
+  then treats botpose as the camera's field pose and converts it to the
+  robot-center pose via `cameraPose.transformBy(ROBOT_TO_CAMERA.inverse())`.
+
 ## Tuning
 
 All knobs are in `VisionConstants`:

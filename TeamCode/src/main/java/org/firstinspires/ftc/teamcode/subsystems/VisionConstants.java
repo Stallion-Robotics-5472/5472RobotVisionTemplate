@@ -12,6 +12,9 @@ package org.firstinspires.ftc.teamcode.subsystems;
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
 
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
+import org.firstinspires.ftc.teamcode.lib.geometry.Transform2d;
+import org.firstinspires.ftc.teamcode.lib.geometry.Translation2d;
 
 public final class VisionConstants {
     private VisionConstants() {}
@@ -57,6 +60,40 @@ public final class VisionConstants {
     public static final int LIMELIGHT_PIPELINE = 0;
     /** How often (Hz) to poll the Limelight for new results. */
     public static final int LIMELIGHT_POLL_RATE_HZ = 100;
+
+    // ---------------------------------------------------------------------
+    // Camera mounting offset (the Limelight is rarely at the robot's center).
+    //
+    // There are two ways to account for the offset; pick ONE:
+    //
+    //   (A) RECOMMENDED — Enter the camera pose in the Limelight web UI
+    //       (the camera/robot offset fields). Then getBotpose_MT2() is already
+    //       the robot-center pose, and you should leave
+    //       APPLY_CAMERA_OFFSET_IN_CODE = false.
+    //
+    //   (B) Enter ZERO offset in the Limelight UI and set the offset here in
+    //       code instead. botpose is then the camera's field pose, and we
+    //       convert it to the robot-center pose with ROBOT_TO_CAMERA below.
+    //       Set APPLY_CAMERA_OFFSET_IN_CODE = true.
+    //
+    // Do NOT do both, or the offset is applied twice.
+    // ---------------------------------------------------------------------
+    public static final boolean APPLY_CAMERA_OFFSET_IN_CODE = false;
+
+    /** Camera position relative to robot center: +X = forward, +Y = left (inches). */
+    public static final double CAMERA_FORWARD_OFFSET_IN = 6.0;
+    public static final double CAMERA_LEFT_OFFSET_IN = 0.0;
+    /** Camera yaw relative to robot forward, CCW positive (degrees). */
+    public static final double CAMERA_YAW_OFFSET_DEG = 0.0;
+
+    /**
+     * Transform from the robot-center frame to the camera frame. Composing the
+     * robot pose with this yields the camera pose; the inverse converts a
+     * measured camera field pose back to the robot-center pose.
+     */
+    public static final Transform2d ROBOT_TO_CAMERA = new Transform2d(
+            new Translation2d(CAMERA_FORWARD_OFFSET_IN, CAMERA_LEFT_OFFSET_IN),
+            Rotation2d.fromDegrees(CAMERA_YAW_OFFSET_DEG));
 
     // ---------------------------------------------------------------------
     // Kalman fusion tuning (std devs: {x in, y in, heading rad}).
