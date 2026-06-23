@@ -1,0 +1,84 @@
+/*
+ * Autonomous template — "just plop in the path".
+ *
+ * Generate a path in the Path Planner (assets/pathplanner.html, or the robot's
+ * IP at /pathplanner), copy the generated Java, and paste it into the marked
+ * block below. The planner emits exactly:
+ *
+ *     localization.setStartingPose(new Pose2d(...));
+ *     Path path0 = new Path(new BezierCurve(...)).set...Heading(...);
+ *     ...
+ *     PathChain chain = new PathChain(path0, ...);
+ *     follower.followPath(chain);
+ *
+ * which references the same `localization` and `follower` variables created
+ * here, so it pastes in verbatim. The example path below compiles and runs as-is
+ * — replace it with your own.
+ */
+package org.firstinspires.ftc.teamcode.opmodes;
+
+import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
+import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
+
+import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
+import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
+import org.firstinspires.ftc.teamcode.lib.geometry.Translation2d;
+import org.firstinspires.ftc.teamcode.pathing.BezierCurve;
+import org.firstinspires.ftc.teamcode.pathing.Follower;
+import org.firstinspires.ftc.teamcode.pathing.MecanumDrivetrain;
+import org.firstinspires.ftc.teamcode.pathing.Path;
+import org.firstinspires.ftc.teamcode.pathing.PathChain;
+import org.firstinspires.ftc.teamcode.subsystems.Localization;
+
+@Autonomous(name = "Path Auto", group = "Auto")
+public class PathAuto extends LinearOpMode {
+
+    @Override
+    public void runOpMode() throws InterruptedException {
+        Localization localization = new Localization(hardwareMap);
+        MecanumDrivetrain drivetrain = new MecanumDrivetrain(hardwareMap);
+        Follower follower = new Follower(localization, drivetrain);
+
+        telemetry.addLine("Auto ready. Press play.");
+        telemetry.update();
+        waitForStart();
+        if (isStopRequested()) return;
+
+        // ===================== PASTE PATH PLANNER OUTPUT BELOW =====================
+        localization.setStartingPose(new Pose2d(0, 0, Rotation2d.fromDegrees(0)));
+
+        Path path0 = new Path(new BezierCurve(
+                new Translation2d(0, 0),
+                new Translation2d(20, 0),
+                new Translation2d(10, 30),
+                new Translation2d(30, 30)))
+                .setLinearHeading(Math.toRadians(0), Math.toRadians(90));
+
+        PathChain chain = new PathChain(path0);
+        follower.followPath(chain);
+        // ===================== PASTE PATH PLANNER OUTPUT ABOVE =====================
+
+        // Drive the path to completion.
+        while (opModeIsActive() && follower.isBusy()) {
+            follower.update();
+
+            localization.addTelemetry(telemetry);
+            telemetry.addData("Path", "seg %d  t=%.2f  remaining=%.1f in",
+                    follower.getPathIndex(), follower.getClosestT(), follower.getRemainingLength());
+            telemetry.addData("Errors", "cross %.2f in  heading %.1f deg",
+                    follower.getCrossTrackError(), Math.toDegrees(follower.getHeadingError()));
+            telemetry.update();
+        }
+
+        drivetrain.stop();
+        localization.stop();
+
+        // Hold here so the final pose stays on screen until the OpMode is stopped.
+        while (opModeIsActive()) {
+            telemetry.addLine("Path complete.");
+            localization.addTelemetry(telemetry);
+            telemetry.update();
+            sleep(50);
+        }
+    }
+}
