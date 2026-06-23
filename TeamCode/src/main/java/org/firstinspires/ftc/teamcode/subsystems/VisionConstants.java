@@ -45,9 +45,9 @@ public final class VisionConstants {
      * The sample defaults below are for goBILDA's reference build; measure and
      * replace them for your robot.
      */
-    public static final double PINPOINT_X_OFFSET_MM = -84.0;
-    public static final double PINPOINT_Y_OFFSET_MM = -168.0;
-    public static final DistanceUnit PINPOINT_OFFSET_UNIT = DistanceUnit.MM;
+    public static final double PINPOINT_X_OFFSET_MM = -3.125;
+    public static final double PINPOINT_Y_OFFSET_MM = 3.375;
+    public static final DistanceUnit PINPOINT_OFFSET_UNIT = DistanceUnit.INCH;
 
     /** Pod type. Use goBILDA_SWINGARM_POD or goBILDA_4_BAR_POD for goBILDA pods. */
     public static final GoBildaPinpointDriver.GoBildaOdometryPods PINPOINT_POD_TYPE =
@@ -55,9 +55,9 @@ public final class VisionConstants {
 
     /** Direction each pod counts. Flip these if a pod reads backwards. */
     public static final GoBildaPinpointDriver.EncoderDirection PINPOINT_X_DIRECTION =
-            GoBildaPinpointDriver.EncoderDirection.FORWARD;
+            GoBildaPinpointDriver.EncoderDirection.REVERSED;
     public static final GoBildaPinpointDriver.EncoderDirection PINPOINT_Y_DIRECTION =
-            GoBildaPinpointDriver.EncoderDirection.FORWARD;
+            GoBildaPinpointDriver.EncoderDirection.REVERSED;
 
     // ---------------------------------------------------------------------
     // Limelight 3A configuration.
@@ -137,9 +137,11 @@ public final class VisionConstants {
     public static final double VISION_XY_STD_DEV_COEFFICIENT = 2.0;
 
     /**
-     * Heading std dev (radians) for vision. We use MegaTag2, whose heading comes
-     * from the gyro we feed in, so vision should NOT move heading. A very large
-     * value drives the heading Kalman gain to ~0.
+     * Heading std dev (radians) for vision. Heading is taken directly from the
+     * Pinpoint gyro: Localization builds each vision measurement's rotation from
+     * the gyro and reports the gyro heading in getPose(), so the camera never
+     * moves heading. This large value is belt-and-suspenders (drives the heading
+     * Kalman gain to ~0) in case a measurement ever carries a camera yaw.
      */
     public static final double VISION_HEADING_STD_DEV = 9999.0;
 

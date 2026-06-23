@@ -81,6 +81,7 @@ public class Localization implements Localizer {
         odometry.update();
         odometry.setPose(pose);
         poseEstimator.resetPose(pose);
+        lastOdometryPose = pose;
     }
 
     /** Runs one fusion cycle. Call once per loop. */
@@ -99,8 +100,9 @@ public class Localization implements Localizer {
             return;
         }
 
-        // 2) Hand the camera our best heading so MegaTag2 can localize.
-        double headingDegrees = poseEstimator.getEstimatedPosition().getRotation().getDegrees();
+        // 2) Hand the camera the GYRO heading so MegaTag2 can localize. Heading
+        // always comes from the Pinpoint IMU, never from the camera.
+        double headingDegrees = lastOdometryPose.getRotation().getDegrees();
         vision.updateRobotOrientation(headingDegrees);
 
         // 3) Vision: validate and, if good, fuse it.
@@ -175,12 +177,15 @@ public class Localization implements Localizer {
                 ? reportedPose3d.transformBy(VisionConstants.ROBOT_TO_CAMERA.inverse())
                 : reportedPose3d;
 
-        // Keep the robot-center 3D pose for diagnostics (z, pitch, roll).
+        // Keep the robot-center 3D pose for diagnostics (z, pitch, roll). Note:
+        // under MegaTag2 the botpose yaw is just the gyro heading we fed in.
         lastVisionPose3d = robotPose3d;
         lastVisionPose3dTimestamp = now;
 
-        // The fused field estimate is 2D (the robot drives on the floor).
-        Pose2d visionPose = robotPose3d.toPose2d();
+        // Fuse only the camera's x/y. The rotation of the measurement is taken
+        // from the gyro, not the camera, so the Limelight never moves heading.
+        Pose2d visionPose = new Pose2d(
+                robotPose3d.getX(), robotPose3d.getY(), lastOdometryPose.getRotation());
 
         // Off-field results are garbage (checked on the robot-center pose).
         double limit = VisionConstants.FIELD_HALF_SIZE_IN + VisionConstants.FIELD_MARGIN_IN;
@@ -205,9 +210,14 @@ public class Localization implements Localizer {
         lastVisionReject = "none";
     }
 
-    /** The fused field pose (inches, radians). This is the localization output. */
+    /**
+     * The fused field pose (inches, radians). X/Y come from the Kalman estimate
+     * (odometry + vision); heading comes straight from the Pinpoint gyro
+     * (instantaneous, never from the camera).
+     */
     public Pose2d getPose() {
-        return poseEstimator.getEstimatedPosition();
+        Pose2d fused = poseEstimator.getEstimatedPosition();
+        return new Pose2d(fused.getX(), fused.getY(), lastOdometryPose.getRotation());
     }
 
     /** Raw Pinpoint-only pose, for comparison/telemetry. */
