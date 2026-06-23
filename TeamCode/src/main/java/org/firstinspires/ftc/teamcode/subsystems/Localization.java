@@ -9,9 +9,9 @@
  *     by standard deviations that grow with tag distance and shrink with tag
  *     count, so far-away or single-tag fixes barely move the pose while close,
  *     multi-tag fixes snap it.
- *   - We use MegaTag2 (getBotpose_MT2), feeding the robot heading down to the
- *     camera each loop, and we deliberately do NOT let vision correct heading
- *     (the gyro is better) by using a huge heading std dev.
+ *   - Vision pose comes from MegaTag1 (getBotpose). Heading is fused with the
+ *     gyro but heavily biased toward it (large VISION_HEADING_STD_DEV), so the
+ *     gyro dominates short-term and vision only slowly corrects heading drift.
  *   - Bad frames (no fix, too few tags, stale, off-field) are rejected.
  *   - Vision measurements are timestamped at capture time (now minus pipeline
  *     latency) so the estimator can latency-compensate them.
@@ -30,7 +30,6 @@ import org.firstinspires.ftc.robotcore.external.navigation.Position;
 import org.firstinspires.ftc.teamcode.lib.estimator.PoseEstimator;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose3d;
-import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
 import org.firstinspires.ftc.teamcode.pathing.Localizer;
 
 public class Localization implements Localizer {
@@ -101,8 +100,9 @@ public class Localization implements Localizer {
             return;
         }
 
-        // 2) Hand the camera the GYRO heading so MegaTag2 can localize. Heading
-        // always comes from the Pinpoint IMU, never from the camera.
+        // 2) Feed the gyro heading to the camera. This is only used by MegaTag2
+        // (getBotpose_MT2); it's harmless with the MegaTag1 path below, and keeps
+        // things ready if you switch the vision pose to MegaTag2.
         double headingDegrees = lastOdometryPose.getRotation().getDegrees();
         vision.updateRobotOrientation(headingDegrees);
 
@@ -141,7 +141,7 @@ public class Localization implements Localizer {
             return;
         }
 
-        // MegaTag2 pose: relies on the heading we pushed in updateRobotOrientation.
+        // MegaTag1 pose: independent vision pose (x/y + heading) from tag geometry.
         Pose3D botpose = result.getBotpose();
         if (botpose == null) {
             lastVisionReject = "null botpose";
@@ -152,7 +152,7 @@ public class Localization implements Localizer {
         double xIn = position.x;
         double yIn = position.y;
 
-        // MegaTag2 reports the origin when it has no real fix. Check the raw
+        // Vision reports the origin when it has no real fix. Check the raw
         // botpose here, before any camera-offset transform shifts it away from 0.
         if (xIn == 0.0 && yIn == 0.0) {
             lastVisionReject = "origin (no fix)";
@@ -178,36 +178,15 @@ public class Localization implements Localizer {
                 ? reportedPose3d.transformBy(VisionConstants.ROBOT_TO_CAMERA.inverse())
                 : reportedPose3d;
 
-        // Keep the robot-center 3D pose for diagnostics (z, pitch, roll). Note:
-        // under MegaTag2 the botpose yaw is just the gyro heading we fed in.
+        // Keep the robot-center 3D pose for diagnostics (z, pitch, roll).
         lastVisionPose3d = robotPose3d;
         lastVisionPose3dTimestamp = now;
 
-        // Heading: fuse an INDEPENDENT vision heading from MegaTag1 (getBotpose),
-        // which is derived from tag geometry rather than the gyro we feed MegaTag2.
-        // This lets vision slowly correct gyro drift. The heavy heading std dev
-        // (VISION_HEADING_STD_DEV) keeps the fusion strongly biased toward the
-        // gyro/odometry. Falls back to the gyro heading if MegaTag1 has no fix.
-        double visionHeadingRad = lastOdometryPose.getRotation().getRadians();
-        Pose3D botposeMT1 = result.getBotpose();
-        if (botposeMT1 != null) {
-            Position mt1 = botposeMT1.getPosition().toUnit(DistanceUnit.INCH);
-            if (!(mt1.x == 0.0 && mt1.y == 0.0)) {
-                Pose3d mt1Pose3d = new Pose3d(
-                        mt1.x, mt1.y, mt1.z,
-                        botposeMT1.getOrientation().getRoll(AngleUnit.RADIANS),
-                        botposeMT1.getOrientation().getPitch(AngleUnit.RADIANS),
-                        botposeMT1.getOrientation().getYaw(AngleUnit.RADIANS));
-                if (VisionConstants.APPLY_CAMERA_OFFSET_IN_CODE) {
-                    mt1Pose3d = mt1Pose3d.transformBy(VisionConstants.ROBOT_TO_CAMERA.inverse());
-                }
-                visionHeadingRad = mt1Pose3d.getYaw();
-            }
-        }
-
-        // x/y from MegaTag2 (gyro-assisted), heading from MegaTag1 (independent).
-        Pose2d visionPose = new Pose2d(
-                robotPose3d.getX(), robotPose3d.getY(), new Rotation2d(visionHeadingRad));
+        // MegaTag1 gives an independent x/y AND heading (from tag geometry, not
+        // the gyro). The heading is fused with the gyro but heavily biased toward
+        // it via VISION_HEADING_STD_DEV, so the gyro dominates short-term and
+        // vision only slowly corrects heading drift.
+        Pose2d visionPose = robotPose3d.toPose2d();
 
         // Off-field results are garbage (checked on the robot-center pose).
         double limit = VisionConstants.FIELD_HALF_SIZE_IN + VisionConstants.FIELD_MARGIN_IN;

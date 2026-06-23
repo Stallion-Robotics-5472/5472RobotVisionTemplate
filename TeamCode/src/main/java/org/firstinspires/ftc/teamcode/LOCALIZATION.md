@@ -19,14 +19,14 @@ is blended in as an absolute measurement weighted by standard deviations.
 3. **Dynamic std devs (AdvantageKit style)** — Vision XY std dev scales with
    `avgTagDistance² / tagCount`. Close, multi-tag fixes snap the pose; far-away
    or single-tag fixes barely move it.
-4. **Heading: gyro-dominant fusion** — We feed the Pinpoint gyro heading to the
-   Limelight each loop (`updateRobotOrientation`) and use **MegaTag2**
-   (`getBotpose_MT2()`) for x/y. Heading is *fused*: the gyro/odometry is the
-   backbone (the estimate tracks gyro deltas every loop), and an **independent**
-   vision heading from **MegaTag1** (`getBotpose()`, derived from tag geometry,
-   not the gyro) slowly corrects gyro drift. The large `VISION_HEADING_STD_DEV`
-   keeps the blend heavily weighted toward the gyro (~4% vision per frame), so
-   it's reactive to odometry and only gently pulled by vision.
+4. **Vision pose + gyro-dominant heading fusion** — The vision pose (x/y and
+   heading) comes from **MegaTag1** (`getBotpose()`, derived from tag geometry).
+   Heading is *fused* with the gyro: the gyro/odometry is the backbone (the
+   estimate tracks gyro deltas every loop) and MegaTag1 only slowly corrects
+   heading drift. The large `VISION_HEADING_STD_DEV` keeps the blend heavily
+   weighted toward the gyro (~4% vision per frame), so heading is reactive to
+   odometry and only gently pulled by vision. (We still feed the gyro to the
+   camera via `updateRobotOrientation` so you can switch to MegaTag2 for x/y.)
 5. **Latency compensation** — Each frame is timestamped at *capture* time
    (`now − captureLatency − targetingLatency`). The estimator looks up where
    odometry was at that instant, applies the correction there, then replays
