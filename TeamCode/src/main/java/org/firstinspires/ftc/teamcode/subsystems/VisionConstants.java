@@ -137,13 +137,14 @@ public final class VisionConstants {
     public static final double VISION_XY_STD_DEV_COEFFICIENT = 2.0;
 
     /**
-     * Heading std dev (radians) for vision. Heading is taken directly from the
-     * Pinpoint gyro: Localization builds each vision measurement's rotation from
-     * the gyro and reports the gyro heading in getPose(), so the camera never
-     * moves heading. This large value is belt-and-suspenders (drives the heading
-     * Kalman gain to ~0) in case a measurement ever carries a camera yaw.
+     * Heading std dev (radians) for vision (MegaTag1 heading). Heading is fused
+     * with the gyro but heavily biased toward it: the Kalman gain is
+     *   q / (q + sqrt(q*r)),  q = ODOMETRY heading var, r = this^2.
+     * With odometry heading std = 2 deg and this = 45 deg, the gain is ~0.04, so
+     * the gyro dominates short-term and vision only slowly corrects drift.
+     * Increase to trust the gyro even more; decrease to let vision pull harder.
      */
-    public static final double VISION_HEADING_STD_DEV = 9999.0;
+    public static final double VISION_HEADING_STD_DEV = Math.toRadians(45.0);
 
     // ---------------------------------------------------------------------
     // Vision measurement rejection filters.

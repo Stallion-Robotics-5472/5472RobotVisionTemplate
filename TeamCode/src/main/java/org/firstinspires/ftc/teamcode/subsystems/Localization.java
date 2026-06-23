@@ -30,6 +30,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.Position;
 import org.firstinspires.ftc.teamcode.lib.estimator.PoseEstimator;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose3d;
+import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
 import org.firstinspires.ftc.teamcode.pathing.Localizer;
 
 public class Localization implements Localizer {
@@ -182,10 +183,31 @@ public class Localization implements Localizer {
         lastVisionPose3d = robotPose3d;
         lastVisionPose3dTimestamp = now;
 
-        // Fuse only the camera's x/y. The rotation of the measurement is taken
-        // from the gyro, not the camera, so the Limelight never moves heading.
+        // Heading: fuse an INDEPENDENT vision heading from MegaTag1 (getBotpose),
+        // which is derived from tag geometry rather than the gyro we feed MegaTag2.
+        // This lets vision slowly correct gyro drift. The heavy heading std dev
+        // (VISION_HEADING_STD_DEV) keeps the fusion strongly biased toward the
+        // gyro/odometry. Falls back to the gyro heading if MegaTag1 has no fix.
+        double visionHeadingRad = lastOdometryPose.getRotation().getRadians();
+        Pose3D botposeMT1 = result.getBotpose();
+        if (botposeMT1 != null) {
+            Position mt1 = botposeMT1.getPosition().toUnit(DistanceUnit.INCH);
+            if (!(mt1.x == 0.0 && mt1.y == 0.0)) {
+                Pose3d mt1Pose3d = new Pose3d(
+                        mt1.x, mt1.y, mt1.z,
+                        botposeMT1.getOrientation().getRoll(AngleUnit.RADIANS),
+                        botposeMT1.getOrientation().getPitch(AngleUnit.RADIANS),
+                        botposeMT1.getOrientation().getYaw(AngleUnit.RADIANS));
+                if (VisionConstants.APPLY_CAMERA_OFFSET_IN_CODE) {
+                    mt1Pose3d = mt1Pose3d.transformBy(VisionConstants.ROBOT_TO_CAMERA.inverse());
+                }
+                visionHeadingRad = mt1Pose3d.getYaw();
+            }
+        }
+
+        // x/y from MegaTag2 (gyro-assisted), heading from MegaTag1 (independent).
         Pose2d visionPose = new Pose2d(
-                robotPose3d.getX(), robotPose3d.getY(), lastOdometryPose.getRotation());
+                robotPose3d.getX(), robotPose3d.getY(), new Rotation2d(visionHeadingRad));
 
         // Off-field results are garbage (checked on the robot-center pose).
         double limit = VisionConstants.FIELD_HALF_SIZE_IN + VisionConstants.FIELD_MARGIN_IN;
@@ -211,13 +233,13 @@ public class Localization implements Localizer {
     }
 
     /**
-     * The fused field pose (inches, radians). X/Y come from the Kalman estimate
-     * (odometry + vision); heading comes straight from the Pinpoint gyro
-     * (instantaneous, never from the camera).
+     * The fully fused field pose (inches, radians). X/Y and heading all come from
+     * the Kalman estimate. Heading is dominated by the Pinpoint gyro/odometry
+     * (it tracks gyro deltas every loop) and only slowly corrected by MegaTag1
+     * vision, per VISION_HEADING_STD_DEV.
      */
     public Pose2d getPose() {
-        Pose2d fused = poseEstimator.getEstimatedPosition();
-        return new Pose2d(fused.getX(), fused.getY(), lastOdometryPose.getRotation());
+        return poseEstimator.getEstimatedPosition();
     }
 
     /** Raw Pinpoint-only pose, for comparison/telemetry. */
@@ -248,6 +270,14 @@ public class Localization implements Localizer {
      */
     public Pose3d getVisionPose3d() {
         return lastVisionPose3d;
+    }
+
+    /**
+     * Robot-center 2D pose (x, y, yaw) from the most recent valid vision frame.
+     * Check {@link #getVisionPose3dAge(double)} for freshness before trusting it.
+     */
+    public Pose2d getVisionPose2d() {
+        return lastVisionPose3d.toPose2d();
     }
 
     public double getVisionZ() {
