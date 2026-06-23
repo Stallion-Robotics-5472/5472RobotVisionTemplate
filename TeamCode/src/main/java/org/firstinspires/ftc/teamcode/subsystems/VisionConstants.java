@@ -23,7 +23,7 @@ public final class VisionConstants {
     // without a Limelight plugged in, or to A/B test fusion vs. dead reckoning.
     // Can also be toggled at runtime via Localization.setVisionEnabled(...).
     // ---------------------------------------------------------------------
-    public static final boolean VISION_ENABLED = false;
+    public static final boolean VISION_ENABLED = true;
 
     // ---------------------------------------------------------------------
     // Hardware-map device names. These must match your robot configuration.
@@ -57,7 +57,7 @@ public final class VisionConstants {
     public static final GoBildaPinpointDriver.EncoderDirection PINPOINT_X_DIRECTION =
             GoBildaPinpointDriver.EncoderDirection.REVERSED;
     public static final GoBildaPinpointDriver.EncoderDirection PINPOINT_Y_DIRECTION =
-            GoBildaPinpointDriver.EncoderDirection.REVERSED;
+            GoBildaPinpointDriver.EncoderDirection.FORWARD;
 
     // ---------------------------------------------------------------------
     // Limelight 3A configuration.
@@ -91,16 +91,16 @@ public final class VisionConstants {
     // also uses the offset inside its own tag solve; (B) assumes botpose carries
     // the true 3D camera pose (best with a level robot / MegaTag1).
     // ---------------------------------------------------------------------
-    public static final boolean APPLY_CAMERA_OFFSET_IN_CODE = false;
+    public static final boolean APPLY_CAMERA_OFFSET_IN_CODE = true;
 
     /** Camera position relative to robot center (inches): +X fwd, +Y left, +Z up. */
-    public static final double CAMERA_FORWARD_OFFSET_IN = 6.0;
-    public static final double CAMERA_LEFT_OFFSET_IN = 0.0;
-    public static final double CAMERA_UP_OFFSET_IN = 10.0;
+    public static final double CAMERA_FORWARD_OFFSET_IN = -0.98;
+    public static final double CAMERA_LEFT_OFFSET_IN = 6.057;
+    public static final double CAMERA_UP_OFFSET_IN = 4.597;
     /** Camera orientation relative to robot forward (degrees), CCW/right-hand. */
     public static final double CAMERA_ROLL_OFFSET_DEG = 0.0;
-    public static final double CAMERA_PITCH_OFFSET_DEG = 0.0;  // + = tilted up
-    public static final double CAMERA_YAW_OFFSET_DEG = 0.0;
+    public static final double CAMERA_PITCH_OFFSET_DEG = 15;  // + = tilted up
+    public static final double CAMERA_YAW_OFFSET_DEG = -15;
 
     /**
      * Full 3D transform from the robot-center frame to the camera frame.

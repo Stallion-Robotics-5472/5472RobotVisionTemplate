@@ -141,7 +141,7 @@ public class Localization implements Localizer {
         }
 
         // MegaTag2 pose: relies on the heading we pushed in updateRobotOrientation.
-        Pose3D botpose = result.getBotpose_MT2();
+        Pose3D botpose = result.getBotpose();
         if (botpose == null) {
             lastVisionReject = "null botpose";
             return;
