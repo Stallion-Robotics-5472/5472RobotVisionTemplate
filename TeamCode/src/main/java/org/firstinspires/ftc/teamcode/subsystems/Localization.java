@@ -23,6 +23,7 @@ package org.firstinspires.ftc.teamcode.subsystems;
 import com.qualcomm.hardware.limelightvision.LLResult;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
+import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
@@ -285,6 +286,35 @@ public class Localization implements Localizer {
     /** The Limelight wrapper, or null if vision was disabled at construction. */
     public LimelightVision getVision() {
         return vision;
+    }
+
+    /**
+     * Dumps the full localization state to telemetry: fused pose, raw odometry,
+     * and raw vision (when available) plus vision diagnostics. Shared by every
+     * OpMode so logging is consistent everywhere.
+     */
+    public void addTelemetry(Telemetry telemetry) {
+        double now = currentTimeSeconds();
+        Pose2d fused = getPose();
+        Pose2d odo = getOdometryPose();
+        telemetry.addData("Fused", "x %.1f  y %.1f  h %.1f deg",
+                fused.getX(), fused.getY(), fused.getRotation().getDegrees());
+        telemetry.addData("Raw Odometry", "x %.1f  y %.1f  h %.1f deg",
+                odo.getX(), odo.getY(), odo.getRotation().getDegrees());
+        telemetry.addData("Vision", "enabled %s | accepted %s | %s",
+                isVisionEnabled(), wasLastVisionAccepted(), getLastVisionReject());
+        if (lastVisionPose3dTimestamp > Double.NEGATIVE_INFINITY) {
+            Pose2d vis = getVisionPose2d();
+            telemetry.addData("Raw Vision 2D", "x %.1f  y %.1f  h %.1f deg  (age %.2fs)",
+                    vis.getX(), vis.getY(), vis.getRotation().getDegrees(),
+                    getVisionPose3dAge(now));
+            telemetry.addData("Vision tags/dist", "tags %d  dist %.1f",
+                    getLastTagCount(), getLastAvgTagDistance());
+            telemetry.addData("Vision 3D", "z %.1f  pitch %.1f  roll %.1f deg",
+                    getVisionZ(), Math.toDegrees(getVisionPitch()), Math.toDegrees(getVisionRoll()));
+        } else {
+            telemetry.addData("Raw Vision 2D", "none yet");
+        }
     }
 
     /** Stops the Limelight polling thread (if any). Call when the OpMode ends. */

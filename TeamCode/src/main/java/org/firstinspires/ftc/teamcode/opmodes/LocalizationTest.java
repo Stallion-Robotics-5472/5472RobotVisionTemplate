@@ -33,26 +33,7 @@ public class LocalizationTest extends LinearOpMode {
 
         while (opModeIsActive()) {
             localization.update();
-
-            Pose2d fused = localization.getPose();
-            Pose2d odo = localization.getOdometryPose();
-
-            telemetry.addData("Fused", "x %.1f  y %.1f  h %.1f deg",
-                    fused.getX(), fused.getY(), fused.getRotation().getDegrees());
-            telemetry.addData("Odometry", "x %.1f  y %.1f  h %.1f deg",
-                    odo.getX(), odo.getY(), odo.getRotation().getDegrees());
-            telemetry.addData("Vision enabled", localization.isVisionEnabled());
-            telemetry.addData("Vision accepted", localization.wasLastVisionAccepted());
-            telemetry.addData("Vision status", localization.getLastVisionReject());
-            Pose2d vis = localization.getVisionPose2d();
-            telemetry.addData("Vision 2D", "x %.1f  y %.1f  h %.1f deg",
-                    vis.getX(), vis.getY(), vis.getRotation().getDegrees());
-            telemetry.addData("Tags", localization.getLastTagCount());
-            telemetry.addData("Avg tag dist", "%.2f", localization.getLastAvgTagDistance());
-            telemetry.addData("Vision 3D", "z %.1f  pitch %.1f  roll %.1f deg",
-                    localization.getVisionZ(),
-                    Math.toDegrees(localization.getVisionPitch()),
-                    Math.toDegrees(localization.getVisionRoll()));
+            localization.addTelemetry(telemetry);
             telemetry.update();
         }
 
