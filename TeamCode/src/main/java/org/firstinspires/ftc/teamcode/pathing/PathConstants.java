@@ -43,6 +43,15 @@ public final class PathConstants {
     public static final double HEADING_kF = 0.0;
 
     /**
+     * Flips the sign of the heading PID output before it's sent to the
+     * drivetrain as turn power. Depends on which way positive turn power
+     * actually spins the robot (e.g. all motors reversed flips this). If the
+     * robot turns away from the target heading instead of toward it, flip
+     * this between 1.0 and -1.0.
+     */
+    public static final double HEADING_CORRECTION_SIGN = -1.0;
+
+    /**
      * Centripetal scaling. The centripetal correction magnitude is
      * CENTRIPETAL_SCALE * speed^2 * curvature, nudging the robot toward the
      * inside of a curve so it doesn't drift wide. Keep small; tune up if the

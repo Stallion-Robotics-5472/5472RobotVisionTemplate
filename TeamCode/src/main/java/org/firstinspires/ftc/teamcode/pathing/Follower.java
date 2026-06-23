@@ -142,7 +142,8 @@ public class Follower {
 
         // --- heading control ---
         double headingError = Path.shortestAngle(targetHeading - pose.getHeading());
-        double turn = clamp(-1 * headingPID.calculate(headingError, dt), -1.0, 1.0);
+        double turn = clamp(PathConstants.HEADING_CORRECTION_SIGN
+                * headingPID.calculate(headingError, dt), -1.0, 1.0);
 
         drivetrain.driveFieldCentric(fieldVec.getX(), fieldVec.getY(), turn, pose.getRotation());
 
