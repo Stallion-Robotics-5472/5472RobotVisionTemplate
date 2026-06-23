@@ -25,19 +25,19 @@ public final class PathConstants {
     public static final DcMotorSimple.Direction BACK_RIGHT_DIRECTION = DcMotorSimple.Direction.REVERSE;
 
     // ----- Translational controller: pulls the robot onto the path (per inch) -----
-    public static final double TRANSLATIONAL_kP = 0.10;
+    public static final double TRANSLATIONAL_kP = 0.04;
     public static final double TRANSLATIONAL_kI = 0.0;
     public static final double TRANSLATIONAL_kD = 0.010;
     public static final double TRANSLATIONAL_kF = 0.0;
 
     // ----- Drive controller: moves the robot along the path (per inch remaining) -----
-    public static final double DRIVE_kP = 0.10;
+    public static final double DRIVE_kP = 0.040;
     public static final double DRIVE_kI = 0.0;
     public static final double DRIVE_kD = 0.010;
     public static final double DRIVE_kF = 0.0;
 
     // ----- Heading controller: holds the target heading (per radian) -----
-    public static final double HEADING_kP = 1.20;
+    public static final double HEADING_kP = 0.30;
     public static final double HEADING_kI = 0.0;
     public static final double HEADING_kD = 0.08;
     public static final double HEADING_kF = 0.0;
