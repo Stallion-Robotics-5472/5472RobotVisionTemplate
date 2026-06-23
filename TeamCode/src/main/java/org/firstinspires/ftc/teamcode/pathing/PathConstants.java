@@ -13,10 +13,10 @@ public final class PathConstants {
     private PathConstants() {}
 
     // ----- Drivetrain motor names (match your robot configuration) -----
-    public static final String FRONT_LEFT_MOTOR = "front_left_drive";
-    public static final String FRONT_RIGHT_MOTOR = "front_right_drive";
-    public static final String BACK_LEFT_MOTOR = "back_left_drive";
-    public static final String BACK_RIGHT_MOTOR = "back_right_drive";
+    public static final String FRONT_LEFT_MOTOR = "fl";
+    public static final String FRONT_RIGHT_MOTOR = "fr";
+    public static final String BACK_LEFT_MOTOR = "bl";
+    public static final String BACK_RIGHT_MOTOR = "br";
 
     // Reverse the side whose wheels spin backwards for positive power.
     public static final DcMotorSimple.Direction FRONT_LEFT_DIRECTION = DcMotorSimple.Direction.REVERSE;

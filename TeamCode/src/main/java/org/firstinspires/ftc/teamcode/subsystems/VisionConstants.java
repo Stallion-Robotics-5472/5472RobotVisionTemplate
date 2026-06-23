@@ -23,7 +23,7 @@ public final class VisionConstants {
     // without a Limelight plugged in, or to A/B test fusion vs. dead reckoning.
     // Can also be toggled at runtime via Localization.setVisionEnabled(...).
     // ---------------------------------------------------------------------
-    public static final boolean VISION_ENABLED = true;
+    public static final boolean VISION_ENABLED = false;
 
     // ---------------------------------------------------------------------
     // Hardware-map device names. These must match your robot configuration.
