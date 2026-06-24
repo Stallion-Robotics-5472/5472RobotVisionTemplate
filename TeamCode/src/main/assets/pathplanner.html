@@ -8,6 +8,10 @@
   No external libraries. Open this file directly in a browser, or serve it from
   the robot (see LOCALIZATION/PATHING docs) to reach it at the robot's IP.
 
+  Field map: a built-in field is drawn so it works out of the box; drop in (or
+  pick) your season's field image to plan against it. The image stretches to the
+  full 144" field and is remembered in the browser (localStorage).
+
   Field convention matches the pose estimator: 144" x 144", origin at center,
   +X to the right, +Y up, heading in degrees CCW from +X.
 -->
@@ -53,6 +57,14 @@
     Click empty field to add a control point to the selected path · drag points to move ·
     double-click a point to delete it · readout below is in field inches.
     <div id="readout" class="tag" style="margin-top:6px;">cursor: —</div>
+    <div class="row" style="margin-top:8px;">
+      <label>Field map</label>
+      <input type="file" id="fieldFile" accept="image/*">
+      <button id="clearField">Use default</button>
+      <label>opacity</label>
+      <input type="range" id="fieldOpacity" min="0" max="1" step="0.05" value="0.85" style="width:110px;">
+      <span class="pill">or drag &amp; drop an image onto the field</span>
+    </div>
   </div>
 </div>
 
@@ -114,6 +126,55 @@ function toCanvas(p) { return { x: (p.x + HALF) * SCALE, y: (HALF - p.y) * SCALE
 function toField(cx, cy) { return { x: cx / SCALE - HALF, y: HALF - cy / SCALE }; }
 function round1(v) { return Math.round(v * 10) / 10; }
 
+// ---------- field map ----------
+// Background can be either the built-in procedural FTC field (foam tiles +
+// perimeter wall, drawn with zero dependencies) or an image the user drops in.
+// The image is stored as a data URL in localStorage so it survives reloads and
+// works when this page is served from the robot (no server-side asset needed).
+let fieldImage = null;     // HTMLImageElement once a custom field image loads
+let fieldOpacity = 0.85;
+
+function setFieldImage(dataUrl) {
+  try { localStorage.setItem("ftcFieldImage", dataUrl); } catch (e) {}
+  if (typeof Image === "undefined") return;
+  const img = new Image();
+  img.onload = () => { fieldImage = img; draw(); };
+  img.src = dataUrl;
+}
+function loadFieldFile(file) {
+  if (!file || typeof FileReader === "undefined") return;
+  const reader = new FileReader();
+  reader.onload = () => setFieldImage(reader.result);
+  reader.readAsDataURL(file);
+}
+function drawField() {
+  if (fieldImage && fieldImage.complete && fieldImage.naturalWidth > 0) {
+    ctx.save();
+    ctx.globalAlpha = fieldOpacity;
+    ctx.drawImage(fieldImage, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  } else {
+    drawProceduralField();
+  }
+}
+function drawProceduralField() {
+  // 6x6 grid of 24" foam tiles.
+  const tile = 24 * SCALE;
+  for (let r = 0; r < 6; r++) for (let c = 0; c < 6; c++) {
+    ctx.fillStyle = ((r + c) % 2 === 0) ? "#171c24" : "#141a23";
+    ctx.fillRect(c * tile, r * tile, tile, tile);
+  }
+  // tile seams
+  ctx.strokeStyle = "#0c0f14"; ctx.lineWidth = 2;
+  for (let i = 0; i <= 6; i++) {
+    ctx.beginPath(); ctx.moveTo(i * tile, 0); ctx.lineTo(i * tile, canvas.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i * tile); ctx.lineTo(canvas.width, i * tile); ctx.stroke();
+  }
+  // perimeter wall
+  ctx.strokeStyle = "#3a4760"; ctx.lineWidth = 6;
+  ctx.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
+}
+
 // ---------- bezier (De Casteljau) ----------
 function bezierPoint(points, t) {
   let pts = points.map(p => ({ x: p.x, y: p.y }));
@@ -151,8 +212,10 @@ function headingAt(path, t) {
 // ---------- drawing ----------
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // grid every 24"
-  ctx.strokeStyle = "#1c2533"; ctx.lineWidth = 1;
+  // field map background (procedural field, or a loaded image)
+  drawField();
+  // grid every 24" — translucent so it reads over the field image too
+  ctx.strokeStyle = "rgba(150,170,200,0.16)"; ctx.lineWidth = 1;
   for (let i = -HALF; i <= HALF; i += 24) {
     const a = toCanvas({ x: i, y: -HALF }), b = toCanvas({ x: i, y: HALF });
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
@@ -160,7 +223,7 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.stroke();
   }
   // axes
-  ctx.strokeStyle = "#33445a"; ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "rgba(140,170,210,0.55)"; ctx.lineWidth = 1.5;
   const o = toCanvas({ x: 0, y: 0 });
   ctx.beginPath(); ctx.moveTo(o.x, 0); ctx.lineTo(o.x, canvas.height); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(0, o.y); ctx.lineTo(canvas.width, o.y); ctx.stroke();
@@ -368,6 +431,44 @@ document.getElementById("loadBtn").addEventListener("click", () => {
   document.getElementById("startH").value = state.start.h;
   sync();
 });
+
+// ---------- field map glue ----------
+const fieldFileEl = document.getElementById("fieldFile");
+if (fieldFileEl) fieldFileEl.addEventListener("change",
+  e => loadFieldFile(e.target.files && e.target.files[0]));
+const clearFieldEl = document.getElementById("clearField");
+if (clearFieldEl) clearFieldEl.addEventListener("click", () => {
+  fieldImage = null;
+  try { localStorage.removeItem("ftcFieldImage"); } catch (e) {}
+  draw();
+});
+const fieldOpacityEl = document.getElementById("fieldOpacity");
+if (fieldOpacityEl) {
+  fieldOpacityEl.value = fieldOpacity;
+  fieldOpacityEl.addEventListener("input", () => {
+    fieldOpacity = parseFloat(fieldOpacityEl.value) || 0;
+    try { localStorage.setItem("ftcFieldOpacity", String(fieldOpacity)); } catch (e) {}
+    draw();
+  });
+}
+canvas.addEventListener("dragover", e => e.preventDefault());
+canvas.addEventListener("drop", e => {
+  e.preventDefault();
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) loadFieldFile(f);
+});
+
+// Restore a previously loaded field image / opacity.
+(function initFieldMap() {
+  const savedOp = localStorage.getItem("ftcFieldOpacity");
+  if (savedOp !== null) fieldOpacity = parseFloat(savedOp) || 0;
+  const savedImg = localStorage.getItem("ftcFieldImage");
+  if (savedImg && typeof Image !== "undefined") {
+    const img = new Image();
+    img.onload = () => { fieldImage = img; draw(); };
+    img.src = savedImg;
+  }
+})();
 
 sync();
 </script>

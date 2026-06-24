@@ -84,3 +84,15 @@ To use it:
   the first deploy.
 - **Locally** — you can also just open `assets/pathplanner.html` in any browser;
   it has no server dependency.
+
+### Field map
+
+The canvas shows a built-in field backdrop (24" foam tiles + perimeter wall) so
+it works out of the box. To plan against the real season field, drop a field
+image onto the canvas (or use the **Field map** file picker) — for example the
+official field PNG from FIRST. The image is stretched to the full 144"×144"
+field, so use a top-down image whose edges are the field perimeter. Adjust the
+**opacity** slider to taste, or click **Use default** to go back to the built-in
+field. Your chosen image and opacity are saved in the browser (localStorage), so
+they persist across reloads and when the page is served from the robot — no
+extra asset or server change is needed.
