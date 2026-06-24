@@ -84,6 +84,12 @@
       <button id="clearAll">Clear all</button>
       <span class="pill">Each new path starts where the previous one ends.</span>
     </div>
+    <div class="row">
+      <label>Flip whole plan</label>
+      <button id="flipX" title="Mirror left/right across the field center (negate X)">Flip ⇆</button>
+      <button id="flipY" title="Mirror top/bottom across the field center (negate Y)">Flip ⇅</button>
+      <span class="pill">Mirror to the other alliance side (start, points &amp; headings).</span>
+    </div>
   </div>
 
   <div class="card">
@@ -403,6 +409,35 @@ function genJava() {
   return lines.join("\n");
 }
 
+// ---------- flip (mirror to the other alliance side) ----------
+// axis "x": mirror left/right (negate X). A heading θ becomes 180 - θ.
+// axis "y": mirror top/bottom (negate Y). A heading θ becomes -θ.
+// Tangent/reverse headings are geometric, so they recompute correctly once the
+// points are mirrored; only stored angles (constant/linear) need flipping.
+function flipPoint(p, axis) {
+  return { x: axis === "x" ? -p.x : p.x, y: axis === "y" ? -p.y : p.y };
+}
+function flipHeading(h, axis) {
+  return shortest(axis === "x" ? 180 - h : -h);
+}
+function flipPlan(axis) {
+  const s = flipPoint(state.start, axis);
+  state.start = { x: round1(s.x), y: round1(s.y), h: round1(flipHeading(state.start.h, axis)) };
+  state.paths.forEach(path => {
+    path.points = path.points.map(p => { const q = flipPoint(p, axis); return { x: round1(q.x), y: round1(q.y) }; });
+    if (path.heading.mode === "constant") {
+      path.heading.a = round1(flipHeading(path.heading.a, axis));
+    } else if (path.heading.mode === "linear") {
+      path.heading.a = round1(flipHeading(path.heading.a, axis));
+      path.heading.b = round1(flipHeading(path.heading.b, axis));
+    }
+  });
+  document.getElementById("startX").value = state.start.x;
+  document.getElementById("startY").value = state.start.y;
+  document.getElementById("startH").value = state.start.h;
+  sync();
+}
+
 // ---------- glue ----------
 function sync() {
   state.start.x = parseFloat(document.getElementById("startX").value) || 0;
@@ -414,6 +449,8 @@ function sync() {
 }
 document.getElementById("addPath").addEventListener("click", addPath);
 document.getElementById("clearAll").addEventListener("click", () => { state.paths = []; state.selected = 0; sync(); });
+document.getElementById("flipX").addEventListener("click", () => flipPlan("x"));
+document.getElementById("flipY").addEventListener("click", () => flipPlan("y"));
 ["startX", "startY", "startH"].forEach(id => document.getElementById(id).addEventListener("input", sync));
 document.getElementById("copyBtn").addEventListener("click", () => {
   navigator.clipboard && navigator.clipboard.writeText(document.getElementById("code").value);

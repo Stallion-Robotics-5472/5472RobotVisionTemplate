@@ -85,6 +85,14 @@ To use it:
 - **Locally** — you can also just open `assets/pathplanner.html` in any browser;
   it has no server dependency.
 
+### Flip to the other alliance side
+
+**Flip ⇆** mirrors the whole plan left/right (negate X); **Flip ⇅** mirrors it
+top/bottom (negate Y). Both transform the start pose, every control point, and
+the stored headings (tangent/reverse headings recompute from the mirrored
+points automatically). Build your auto for one alliance, click flip, and copy
+the mirrored Java for the other side.
+
 ### Field map
 
 The canvas shows a built-in field backdrop (24" foam tiles + perimeter wall) so
