@@ -1,147 +1,420 @@
 <!DOCTYPE html>
 <!--
-  Path Planner — an original, self-contained visual editor for building
-  PathChains for this template's follower. Drag control points on the field,
-  choose a heading rule per segment, and copy the generated Java code that uses
-  BezierCurve / Path / PathChain.
+  FTC Path Planner — visual editor for PathChain / BezierCurve paths.
+  Self-contained, no external dependencies. Open directly in a browser or serve
+  from the robot at http://<robot-ip>:8080/pathplanner.
 
-  No external libraries. Open this file directly in a browser, or serve it from
-  the robot (see LOCALIZATION/PATHING docs) to reach it at the robot's IP.
+  Field: 144"×144", origin at center, +X right, +Y up, heading° CCW.
 
-  Field map: a built-in field is drawn so it works out of the box; drop in (or
-  pick) your season's field image to plan against it. The image stretches to the
-  full 144" field and is remembered in the browser (localStorage).
+  Field image: drag & drop a top-down field photo onto the canvas (or use the
+  file picker at the bottom). Stored in localStorage — persists across reloads
+  and when served from the robot with no extra server step needed.
 
-  Field convention matches the pose estimator: 144" x 144", origin at center,
-  +X to the right, +Y up, heading in degrees CCW from +X.
+  Gains panel: all PIDF + centripetal + decel feedforward constants editable in
+  the browser. "Copy gains snippet" generates a Java block to paste into
+  PathConstants.java. Values persist in localStorage.
+
+  Flip: mirrors the whole plan (start pose + all control points + headings) to
+  the other alliance side with one click.
 -->
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>FTC Path Planner</title>
 <style>
-  :root { --bg:#11151c; --panel:#1b2230; --ink:#e7edf5; --muted:#8aa0b6; --accent:#3fa7ff; --line:#2a3547; }
-  * { box-sizing: border-box; }
-  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-         background:var(--bg); color:var(--ink); display:flex; min-height:100vh; }
-  #left { padding:16px; }
-  canvas { background:#0c0f14; border:1px solid var(--line); border-radius:8px; touch-action:none; }
-  #right { flex:1; padding:16px; min-width:320px; max-width:560px; }
-  h1 { font-size:18px; margin:0 0 4px; }
-  .sub { color:var(--muted); font-size:12px; margin-bottom:12px; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
-  .row { display:flex; gap:8px; align-items:center; margin:6px 0; flex-wrap:wrap; }
-  label { color:var(--muted); font-size:12px; }
-  input, select, button { background:#0c0f14; color:var(--ink); border:1px solid var(--line);
-          border-radius:6px; padding:6px 8px; font-size:13px; }
-  input[type=number] { width:78px; }
-  button { cursor:pointer; }
-  button.accent { background:var(--accent); color:#04121f; border-color:var(--accent); font-weight:600; }
-  button:hover { border-color:var(--accent); }
-  .pathItem { border:1px solid var(--line); border-radius:6px; padding:8px; margin:8px 0; }
-  .pathItem.sel { border-color:var(--accent); }
-  .pathHead { display:flex; justify-content:space-between; align-items:center; }
-  .pill { font-size:11px; color:var(--muted); }
-  textarea { width:100%; height:240px; background:#0c0f14; color:var(--ink); border:1px solid var(--line);
-             border-radius:6px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size:12px; padding:8px; }
-  .hint { color:var(--muted); font-size:12px; line-height:1.5; }
-  .tag { display:inline-block; background:#0c0f14; border:1px solid var(--line); border-radius:4px;
-         padding:1px 6px; font-size:11px; color:var(--muted); }
+:root {
+  --bg: #0e1219; --surface: #141b27; --panel: #19212f;
+  --border: #253042; --ink: #dde6f2; --muted: #6e8299;
+  --accent: #3b9eff; --accent-dim: #1a3f6e;
+  --green: #2ecc71; --red: #e74c3c;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  display: flex; height: 100vh; overflow: hidden;
+  background: var(--bg); color: var(--ink);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-size: 13px;
+}
+/* ---- canvas side ---- */
+#canvas-col {
+  flex: 1; min-width: 0; display: flex; flex-direction: column;
+  background: var(--bg);
+}
+#canvas-wrap {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  overflow: hidden; position: relative; min-height: 0;
+}
+canvas#field { display: block; touch-action: none; cursor: crosshair; }
+#canvas-bar {
+  background: var(--surface); border-top: 1px solid var(--border);
+  padding: 5px 12px; display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap; flex-shrink: 0;
+}
+#readout { font-size: 12px; color: var(--muted); min-width: 170px; }
+.fmap { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.fmap label { color: var(--muted); font-size: 11px; }
+.fmap input[type=range] { width: 80px; accent-color: var(--accent); }
+.fmap input[type=file] { font-size: 11px; color: var(--muted); max-width: 170px; }
+/* ---- panel side ---- */
+#panel {
+  width: 390px; flex-shrink: 0; display: flex; flex-direction: column;
+  background: var(--panel); border-left: 1px solid var(--border); overflow: hidden;
+}
+#panel-hdr {
+  padding: 11px 16px 9px; border-bottom: 1px solid var(--border);
+  background: var(--surface); flex-shrink: 0;
+}
+#panel-hdr h1 { font-size: 15px; font-weight: 700; }
+#panel-hdr .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.tab-bar {
+  display: flex; border-bottom: 1px solid var(--border);
+  background: var(--surface); flex-shrink: 0;
+}
+.tab-btn {
+  flex: 1; padding: 8px 4px; font-size: 12px; font-weight: 600;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--muted); cursor: pointer; transition: color .15s, border-color .15s;
+}
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-btn:hover:not(.active) { color: var(--ink); }
+#panel-body { flex: 1; overflow-y: auto; }
+.tab-pane { display: none; padding: 11px; }
+.tab-pane.active { display: block; }
+/* shared components */
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px; margin-bottom: 9px;
+}
+.card-title {
+  font-size: 10px; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .5px; margin-bottom: 7px;
+}
+.row { display: flex; gap: 6px; align-items: center; margin: 5px 0; flex-wrap: wrap; }
+.lbl { color: var(--muted); font-size: 11px; }
+input[type=number], input[type=text], select {
+  background: var(--bg); color: var(--ink); border: 1px solid var(--border);
+  border-radius: 5px; padding: 4px 6px; font-size: 12px;
+}
+input[type=number] { width: 70px; }
+input[type=number].wide { width: 88px; }
+select { padding: 4px 5px; }
+button {
+  background: var(--bg); color: var(--ink); border: 1px solid var(--border);
+  border-radius: 5px; padding: 5px 9px; font-size: 12px; cursor: pointer;
+  white-space: nowrap;
+}
+button:hover { border-color: var(--accent); color: var(--accent); }
+button.primary { background: var(--accent); color: #05111f; border-color: var(--accent); font-weight: 700; }
+button.primary:hover { background: #5ab0ff; }
+button.danger { color: var(--red); border-color: var(--red); }
+button.danger:hover { background: var(--red); color: #fff; }
+.pill { font-size: 11px; color: var(--muted); }
+/* path list */
+.pi {
+  border: 1px solid var(--border); border-radius: 6px; padding: 8px 9px;
+  margin: 5px 0; cursor: pointer; transition: border-color .15s;
+}
+.pi.sel { border-color: var(--accent); }
+.pi:hover:not(.sel) { border-color: #2e3e54; }
+.pi-hd { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.swatch { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.pi-name { font-weight: 600; font-size: 12px; flex: 1; }
+.pi-meta { font-size: 11px; color: var(--muted); }
+/* gains grid */
+.gg {
+  display: grid; grid-template-columns: 32px repeat(4, 1fr);
+  gap: 4px; align-items: center;
+}
+.gg .gh { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; text-align: center; }
+.gg .gl { color: var(--ink); font-size: 11px; font-weight: 600; }
+.gg input { width: 100%; min-width: 0; }
+/* sign toggle */
+.sign-tog { display: inline-flex; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
+.sign-tog button { border: none; border-radius: 0; padding: 4px 10px; background: none; color: var(--muted); font-size: 13px; }
+.sign-tog button.on { background: var(--accent-dim); color: var(--accent); font-weight: 700; }
+/* code */
+textarea {
+  width: 100%; background: var(--bg); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 6px;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px;
+  padding: 8px; resize: vertical; line-height: 1.5;
+}
 </style>
 </head>
 <body>
-<div id="left">
-  <canvas id="field" width="720" height="720"></canvas>
-  <div class="hint" style="margin-top:8px; max-width:720px;">
-    Click empty field to add a control point to the selected path · drag points to move ·
-    double-click a point to delete it · readout below is in field inches.
-    <div id="readout" class="tag" style="margin-top:6px;">cursor: —</div>
-    <div class="row" style="margin-top:8px;">
-      <label>Field map</label>
+
+<!-- ===== LEFT: canvas ===== -->
+<div id="canvas-col">
+  <div id="canvas-wrap">
+    <canvas id="field" width="640" height="640"></canvas>
+  </div>
+  <div id="canvas-bar">
+    <span id="readout">cursor: —</span>
+    <div class="fmap">
+      <label>Field image</label>
       <input type="file" id="fieldFile" accept="image/*">
-      <button id="clearField">Use default</button>
+      <button id="clearField" style="font-size:11px;padding:3px 7px;">Reset</button>
       <label>opacity</label>
-      <input type="range" id="fieldOpacity" min="0" max="1" step="0.05" value="0.85" style="width:110px;">
-      <span class="pill">or drag &amp; drop an image onto the field</span>
+      <input type="range" id="fieldOpacity" min="0" max="1" step="0.05" value="0.85">
+      <span class="pill">or drop image on canvas</span>
     </div>
   </div>
 </div>
 
-<div id="right">
-  <h1>FTC Path Planner</h1>
-  <div class="sub">Builds a <span class="tag">PathChain</span> for the template follower. Field origin = center, +X right, +Y up, heading° CCW.</div>
-
-  <div class="card">
-    <div class="row">
-      <label>Start pose</label>
-      x <input id="startX" type="number" value="0" step="0.5">
-      y <input id="startY" type="number" value="0" step="0.5">
-      heading° <input id="startH" type="number" value="0" step="1">
-    </div>
-    <div class="row">
-      <button class="accent" id="addPath">+ Add path</button>
-      <button id="clearAll">Clear all</button>
-      <span class="pill">Each new path starts where the previous one ends.</span>
-    </div>
-    <div class="row">
-      <label>Flip whole plan</label>
-      <button id="flipX" title="Mirror left/right across the field center (negate X)">Flip ⇆</button>
-      <button id="flipY" title="Mirror top/bottom across the field center (negate Y)">Flip ⇅</button>
-      <span class="pill">Mirror to the other alliance side (start, points &amp; headings).</span>
-    </div>
+<!-- ===== RIGHT: panel ===== -->
+<div id="panel">
+  <div id="panel-hdr">
+    <h1>FTC Path Planner</h1>
+    <div class="sub">144"×144" field · origin center · +X right · +Y up · heading° CCW</div>
   </div>
-
-  <div class="card">
-    <div id="pathList"></div>
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="paths">Paths</button>
+    <button class="tab-btn" data-tab="robot">Robot</button>
+    <button class="tab-btn" data-tab="gains">Gains</button>
+    <button class="tab-btn" data-tab="code">Code</button>
   </div>
+  <div id="panel-body">
 
-  <div class="card">
-    <div class="row" style="justify-content:space-between;">
-      <strong style="font-size:14px;">Generated Java</strong>
-      <div class="row">
-        <button id="copyBtn">Copy</button>
-        <button id="saveBtn">Save</button>
-        <button id="loadBtn">Load</button>
+    <!-- ===== PATHS TAB ===== -->
+    <div class="tab-pane active" id="tab-paths">
+      <div class="card">
+        <div class="card-title">Start Pose</div>
+        <div class="row">
+          <span class="lbl">X (in)</span>
+          <input id="startX" type="number" value="0" step="0.5">
+          <span class="lbl">Y (in)</span>
+          <input id="startY" type="number" value="0" step="0.5">
+          <span class="lbl">H (°)</span>
+          <input id="startH" type="number" value="0" step="1">
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Plan Actions</div>
+        <div class="row">
+          <button class="primary" id="addPath">+ Add Path</button>
+          <button class="danger" id="clearAll">Clear All</button>
+        </div>
+        <div class="row" style="margin-top:3px;">
+          <button id="flipX" title="Mirror left/right: negate X, heading = 180-h">Flip ⇆ L/R</button>
+          <button id="flipY" title="Mirror top/bottom: negate Y, heading = -h">Flip ⇅ T/B</button>
+          <span class="pill">Mirror to other alliance</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">
+          Paths
+          <span class="pill" id="chainMeta" style="margin-left:6px; text-transform:none; letter-spacing:0;"></span>
+        </div>
+        <div id="pathList"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Canvas Controls</div>
+        <div class="pill" style="line-height:1.8;">
+          Click empty field → add point to selected path<br>
+          Drag a handle to reposition it<br>
+          Double-click a handle to delete it<br>
+          Click a path row (or its endpoint handle) to select it
+        </div>
       </div>
     </div>
-    <textarea id="code" readonly spellcheck="false"></textarea>
-  </div>
-</div>
+
+    <!-- ===== ROBOT TAB ===== -->
+    <div class="tab-pane" id="tab-robot">
+      <div class="card">
+        <div class="card-title">Robot Footprint Preview</div>
+        <div class="row">
+          <span class="lbl" style="min-width:60px;">Width (in)</span>
+          <input id="robotW" type="number" value="18" step="0.5" min="1">
+          <span class="lbl" style="min-width:65px;">Length (in)</span>
+          <input id="robotL" type="number" value="18" step="0.5" min="1">
+        </div>
+        <div class="pill" style="margin-top:6px;">
+          The dashed rectangle is drawn at the start pose for visual reference.
+          It does not affect the generated code.
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Mirror Plan</div>
+        <div class="row">
+          <button id="flipX2">Flip ⇆ L/R</button>
+          <button id="flipY2">Flip ⇅ T/B</button>
+        </div>
+        <div class="pill" style="margin-top:4px;">
+          Mirrors the entire plan — start pose, all control points, and stored
+          heading angles — to the other alliance side.
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== GAINS TAB ===== -->
+    <div class="tab-pane" id="tab-gains">
+      <div class="card">
+        <div class="card-title">Translational PIDF <span class="pill" style="text-transform:none;">(cross-track, per inch)</span></div>
+        <div class="gg">
+          <div></div>
+          <div class="gh">kP</div><div class="gh">kI</div><div class="gh">kD</div><div class="gh">kF</div>
+          <div class="gl">TR</div>
+          <input type="number" id="g_tr_kP" step="0.001" value="0.04">
+          <input type="number" id="g_tr_kI" step="0.001" value="0">
+          <input type="number" id="g_tr_kD" step="0.001" value="0.010">
+          <input type="number" id="g_tr_kF" step="0.001" value="0">
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Drive PIDF <span class="pill" style="text-transform:none;">(along path, per inch remaining)</span></div>
+        <div class="gg">
+          <div></div>
+          <div class="gh">kP</div><div class="gh">kI</div><div class="gh">kD</div><div class="gh">kF</div>
+          <div class="gl">DV</div>
+          <input type="number" id="g_dv_kP" step="0.001" value="0.040">
+          <input type="number" id="g_dv_kI" step="0.001" value="0">
+          <input type="number" id="g_dv_kD" step="0.001" value="0.010">
+          <input type="number" id="g_dv_kF" step="0.001" value="0">
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Heading PIDF <span class="pill" style="text-transform:none;">(per radian of heading error)</span></div>
+        <div class="gg">
+          <div></div>
+          <div class="gh">kP</div><div class="gh">kI</div><div class="gh">kD</div><div class="gh">kF</div>
+          <div class="gl">HD</div>
+          <input type="number" id="g_hd_kP" step="0.001" value="0.30">
+          <input type="number" id="g_hd_kI" step="0.001" value="0">
+          <input type="number" id="g_hd_kD" step="0.001" value="0.080">
+          <input type="number" id="g_hd_kF" step="0.001" value="0">
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <span class="lbl">Turn sign</span>
+          <div class="sign-tog">
+            <button id="signNeg" data-sign="-1" class="on">−1</button>
+            <button id="signPos" data-sign="1">+1</button>
+          </div>
+          <span class="pill">If robot turns wrong way, flip.</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Decel Feedforward &amp; Centripetal</div>
+        <div class="row">
+          <span class="lbl" style="min-width:155px;">Centripetal scale</span>
+          <input type="number" id="g_cent" step="0.00001" value="0.0006" class="wide">
+        </div>
+        <div class="row">
+          <span class="lbl" style="min-width:155px;">Zero-power decel (in/s²)</span>
+          <input type="number" id="g_decel" step="1" value="30" class="wide">
+        </div>
+        <div class="row">
+          <span class="lbl" style="min-width:155px;">Max robot speed (in/s)</span>
+          <input type="number" id="g_maxspd" step="1" value="50" class="wide">
+        </div>
+        <div class="pill" style="margin-top:7px; line-height:1.65;">
+          The decel feedforward targets approach speed = √(2·decelRate·remaining),
+          giving a smooth stop at the path end.
+          Measure decelRate: full speed → cut power → decelRate = v²/(2·d).
+          Tune up if the robot overshoots, down if it brakes too early.
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Completion Tolerances</div>
+        <div class="row">
+          <span class="lbl" style="min-width:130px;">Position (in)</span>
+          <input type="number" id="g_endTr" step="0.1" value="1.0" class="wide">
+        </div>
+        <div class="row">
+          <span class="lbl" style="min-width:130px;">Heading (°)</span>
+          <input type="number" id="g_endHd" step="0.5" value="2.0" class="wide">
+        </div>
+        <div class="row">
+          <span class="lbl" style="min-width:130px;">Velocity (in/s)</span>
+          <input type="number" id="g_endVl" step="0.1" value="2.0" class="wide">
+        </div>
+        <div class="row">
+          <span class="lbl" style="min-width:130px;">Advance dist (in)</span>
+          <input type="number" id="g_advL" step="0.1" value="2.0" class="wide">
+        </div>
+        <div class="row">
+          <span class="lbl" style="min-width:130px;">Advance T</span>
+          <input type="number" id="g_advT" step="0.01" value="0.99" class="wide">
+        </div>
+      </div>
+      <div class="card">
+        <div class="row">
+          <button class="primary" id="copyGains">Copy gains snippet</button>
+          <button id="saveGains">Save</button>
+          <button id="loadGains">Load saved</button>
+        </div>
+        <div class="pill" style="margin-top:5px;">Copies a Java block — paste it into PathConstants.java.</div>
+      </div>
+      <textarea id="gainsSnippet" readonly spellcheck="false" style="height:300px;display:none;margin-top:4px;"></textarea>
+    </div>
+
+    <!-- ===== CODE TAB ===== -->
+    <div class="tab-pane" id="tab-code">
+      <div class="row" style="margin-bottom:6px;">
+        <strong style="flex:1;font-size:13px;">Generated Java</strong>
+        <button id="copyBtn">Copy</button>
+        <button id="saveBtn">Save plan</button>
+        <button id="loadBtn">Load plan</button>
+      </div>
+      <textarea id="code" readonly spellcheck="false" style="height:320px;"></textarea>
+      <div class="pill" style="margin-top:6px; line-height:1.65;">
+        Paste into the marked block in PathAuto.java.
+        All required imports are already in the file.
+      </div>
+    </div>
+
+  </div><!-- #panel-body -->
+</div><!-- #panel -->
 
 <script>
 "use strict";
 
-// ---------- model ----------
-// Each path: { points: [{x,y}...], heading: {mode, a, b} }
-//   mode: "tangent" | "reverse" | "linear" | "constant"
-//   linear uses a=start°, b=end°; constant uses a=°; tangent/reverse ignore a,b.
+// ===== PATH COLORS =====
+const PATH_COLORS = ["#3b9eff","#ff6b6b","#51cf66","#ffd43b","#cc5de8","#ff922b"];
+function pathColor(pi) { return PATH_COLORS[pi % PATH_COLORS.length]; }
+
+// ===== STATE =====
 const state = {
   start: { x: 0, y: 0, h: 0 },
   paths: [],
   selected: 0,
+  robot: { width: 18, length: 18 },
+  gains: {
+    tr:   { kP: 0.04,  kI: 0, kD: 0.010, kF: 0 },
+    drive:{ kP: 0.040, kI: 0, kD: 0.010, kF: 0 },
+    head: { kP: 0.30,  kI: 0, kD: 0.080, kF: 0 },
+    headSign: -1,
+    centripetalScale: 0.0006,
+    zeroPowerDecelRate: 30,
+    maxRobotSpeed: 50,
+    endTransTol: 1.0, endHeadTol: 2.0, endVelTol: 2.0,
+    advanceLenTol: 2.0, advanceT: 0.99,
+  }
 };
 
-const FIELD = 144;          // inches
-const HALF = FIELD / 2;     // 72
+// ===== CANVAS =====
+const FIELD = 144, HALF = FIELD / 2;
 const canvas = document.getElementById("field");
 const ctx = canvas.getContext("2d");
-const SCALE = canvas.width / FIELD;   // px per inch
+let SCALE = canvas.width / FIELD;
 
+function resizeCanvas() {
+  const wrap = document.getElementById("canvas-wrap");
+  const cw = (wrap && typeof wrap.clientWidth  === "number") ? wrap.clientWidth  : 640;
+  const ch = (wrap && typeof wrap.clientHeight === "number") ? wrap.clientHeight : 640;
+  const size = Math.max(200, Math.min(cw - 2, ch - 2));
+  canvas.width = size; canvas.height = size;
+  SCALE = size / FIELD;
+}
 function toCanvas(p) { return { x: (p.x + HALF) * SCALE, y: (HALF - p.y) * SCALE }; }
 function toField(cx, cy) { return { x: cx / SCALE - HALF, y: HALF - cy / SCALE }; }
 function round1(v) { return Math.round(v * 10) / 10; }
+function fmt(v) { return Number.isInteger(v) ? v.toFixed(1) : String(v); }
 
-// ---------- field map ----------
-// Background can be either the built-in procedural FTC field (foam tiles +
-// perimeter wall, drawn with zero dependencies) or an image the user drops in.
-// The image is stored as a data URL in localStorage so it survives reloads and
-// works when this page is served from the robot (no server-side asset needed).
-let fieldImage = null;     // HTMLImageElement once a custom field image loads
-let fieldOpacity = 0.85;
-
+// ===== FIELD IMAGE =====
+let fieldImage = null, fieldOpacity = 0.85;
 function setFieldImage(dataUrl) {
-  try { localStorage.setItem("ftcFieldImage", dataUrl); } catch (e) {}
+  try { localStorage.setItem("ftcFieldImage", dataUrl); } catch(e) {}
   if (typeof Image === "undefined") return;
   const img = new Image();
   img.onload = () => { fieldImage = img; draw(); };
@@ -149,14 +422,13 @@ function setFieldImage(dataUrl) {
 }
 function loadFieldFile(file) {
   if (!file || typeof FileReader === "undefined") return;
-  const reader = new FileReader();
-  reader.onload = () => setFieldImage(reader.result);
-  reader.readAsDataURL(file);
+  const r = new FileReader();
+  r.onload = () => setFieldImage(r.result);
+  r.readAsDataURL(file);
 }
 function drawField() {
   if (fieldImage && fieldImage.complete && fieldImage.naturalWidth > 0) {
-    ctx.save();
-    ctx.globalAlpha = fieldOpacity;
+    ctx.save(); ctx.globalAlpha = fieldOpacity;
     ctx.drawImage(fieldImage, 0, 0, canvas.width, canvas.height);
     ctx.restore();
   } else {
@@ -164,33 +436,30 @@ function drawField() {
   }
 }
 function drawProceduralField() {
-  // 6x6 grid of 24" foam tiles.
   const tile = 24 * SCALE;
   for (let r = 0; r < 6; r++) for (let c = 0; c < 6; c++) {
-    ctx.fillStyle = ((r + c) % 2 === 0) ? "#171c24" : "#141a23";
+    ctx.fillStyle = ((r + c) % 2 === 0) ? "#131820" : "#0f141c";
     ctx.fillRect(c * tile, r * tile, tile, tile);
   }
-  // tile seams
-  ctx.strokeStyle = "#0c0f14"; ctx.lineWidth = 2;
+  ctx.strokeStyle = "#090c11"; ctx.lineWidth = 1.5;
   for (let i = 0; i <= 6; i++) {
-    ctx.beginPath(); ctx.moveTo(i * tile, 0); ctx.lineTo(i * tile, canvas.height); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, i * tile); ctx.lineTo(canvas.width, i * tile); ctx.stroke();
+    const v = i * tile;
+    ctx.beginPath(); ctx.moveTo(v, 0); ctx.lineTo(v, canvas.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, v); ctx.lineTo(canvas.width, v); ctx.stroke();
   }
-  // perimeter wall
-  ctx.strokeStyle = "#3a4760"; ctx.lineWidth = 6;
-  ctx.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
+  ctx.strokeStyle = "#3a4d62"; ctx.lineWidth = 5;
+  ctx.strokeRect(2.5, 2.5, canvas.width - 5, canvas.height - 5);
 }
 
-// ---------- bezier (De Casteljau) ----------
+// ===== BEZIER =====
 function bezierPoint(points, t) {
   let pts = points.map(p => ({ x: p.x, y: p.y }));
   while (pts.length > 1) {
-    const next = [];
-    for (let i = 0; i < pts.length - 1; i++) {
-      next.push({ x: pts[i].x + (pts[i + 1].x - pts[i].x) * t,
-                  y: pts[i].y + (pts[i + 1].y - pts[i].y) * t });
-    }
-    pts = next;
+    const n = [];
+    for (let i = 0; i < pts.length - 1; i++)
+      n.push({ x: pts[i].x + (pts[i+1].x - pts[i].x) * t,
+               y: pts[i].y + (pts[i+1].y - pts[i].y) * t });
+    pts = n;
   }
   return pts[0];
 }
@@ -198,13 +467,11 @@ function bezierTangent(points, t) {
   const n = points.length - 1;
   if (n < 1) return { x: 1, y: 0 };
   const d = [];
-  for (let i = 0; i < n; i++) d.push({ x: n * (points[i + 1].x - points[i].x), y: n * (points[i + 1].y - points[i].y) });
-  if (d.length === 1) return d[0];
-  return bezierPoint(d, t);
+  for (let i = 0; i < n; i++)
+    d.push({ x: n*(points[i+1].x-points[i].x), y: n*(points[i+1].y-points[i].y) });
+  return d.length === 1 ? d[0] : bezierPoint(d, t);
 }
-function shortest(deg) { let d = ((deg + 180) % 360 + 360) % 360 - 180; return d; }
-
-// heading (degrees) along a path at parameter t
+function shortest(deg) { return ((deg + 180) % 360 + 360) % 360 - 180; }
 function headingAt(path, t) {
   const h = path.heading;
   if (h.mode === "constant") return h.a;
@@ -214,280 +481,191 @@ function headingAt(path, t) {
   if (h.mode === "reverse") deg += 180;
   return shortest(deg);
 }
+function pathLength(path) {
+  if (path.points.length < 2) return 0;
+  let len = 0, prev = bezierPoint(path.points, 0);
+  for (let s = 1; s <= 100; s++) {
+    const cur = bezierPoint(path.points, s / 100);
+    len += Math.hypot(cur.x - prev.x, cur.y - prev.y);
+    prev = cur;
+  }
+  return len;
+}
 
-// ---------- drawing ----------
+// ===== DRAW =====
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // field map background (procedural field, or a loaded image)
   drawField();
-  // grid every 24" — translucent so it reads over the field image too
-  ctx.strokeStyle = "rgba(150,170,200,0.16)"; ctx.lineWidth = 1;
+
+  // 24" grid (translucent over any background)
+  ctx.strokeStyle = "rgba(150,175,210,0.12)"; ctx.lineWidth = 1;
   for (let i = -HALF; i <= HALF; i += 24) {
-    const a = toCanvas({ x: i, y: -HALF }), b = toCanvas({ x: i, y: HALF });
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    const c = toCanvas({ x: -HALF, y: i }), d = toCanvas({ x: HALF, y: i });
-    ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.stroke();
+    const a = toCanvas({x:i,y:-HALF}), b = toCanvas({x:i,y:HALF});
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    const c = toCanvas({x:-HALF,y:i}), d = toCanvas({x:HALF,y:i});
+    ctx.beginPath(); ctx.moveTo(c.x,c.y); ctx.lineTo(d.x,d.y); ctx.stroke();
   }
   // axes
-  ctx.strokeStyle = "rgba(140,170,210,0.55)"; ctx.lineWidth = 1.5;
-  const o = toCanvas({ x: 0, y: 0 });
-  ctx.beginPath(); ctx.moveTo(o.x, 0); ctx.lineTo(o.x, canvas.height); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0, o.y); ctx.lineTo(canvas.width, o.y); ctx.stroke();
+  ctx.strokeStyle = "rgba(140,175,215,0.4)"; ctx.lineWidth = 1.5;
+  const o = toCanvas({x:0,y:0});
+  ctx.beginPath(); ctx.moveTo(o.x,0); ctx.lineTo(o.x,canvas.height); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0,o.y); ctx.lineTo(canvas.width,o.y); ctx.stroke();
+  // tile labels (12", 24", …)
+  const lblSize = Math.max(8, SCALE * 2.8);
+  ctx.fillStyle = "rgba(110,140,175,0.4)"; ctx.font = `${lblSize}px system-ui`;
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (let i = -HALF + 24; i < HALF; i += 24) {
+    const p = toCanvas({x:i, y:-HALF + 0.5});
+    ctx.fillText(i, p.x, p.y + 2);
+  }
 
-  // start pose marker
-  drawRobot(state.start.x, state.start.y, state.start.h, "#2ecc71");
+  // paths (back-to-front, selected on top)
+  const order = [...state.paths.map((_,i)=>i)];
+  order.sort((a,b) => a === state.selected ? 1 : b === state.selected ? -1 : 0);
 
-  // paths
-  state.paths.forEach((path, pi) => {
+  order.forEach(pi => {
+    const path = state.paths[pi];
     const sel = pi === state.selected;
+    const col = pathColor(pi);
+
     if (path.points.length >= 2) {
-      ctx.strokeStyle = sel ? "#3fa7ff" : "#5d6b7e"; ctx.lineWidth = sel ? 3 : 2;
+      // curve
+      ctx.strokeStyle = col;
+      ctx.lineWidth = sel ? 3.5 : 2.2;
+      ctx.globalAlpha = sel ? 1.0 : 0.5;
       ctx.beginPath();
-      for (let s = 0; s <= 100; s++) {
-        const p = toCanvas(bezierPoint(path.points, s / 100));
-        if (s === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+      for (let s = 0; s <= 120; s++) {
+        const p = toCanvas(bezierPoint(path.points, s / 120));
+        s === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
       }
       ctx.stroke();
-      // heading arrows along the path
-      ctx.strokeStyle = sel ? "#9fd0ff" : "#46535f";
-      for (let s = 0; s <= 10; s++) {
+      ctx.globalAlpha = 1;
+
+      // direction chevrons
+      ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+      ctx.globalAlpha = sel ? 0.8 : 0.3;
+      for (let s = 1; s <= 9; s++) {
         const t = s / 10;
-        const base = toCanvas(bezierPoint(path.points, t));
-        const deg = headingAt(path, t) * Math.PI / 180;
-        ctx.beginPath(); ctx.moveTo(base.x, base.y);
-        ctx.lineTo(base.x + Math.cos(deg) * 14, base.y - Math.sin(deg) * 14); ctx.stroke();
+        const b = toCanvas(bezierPoint(path.points, t));
+        const nx = toCanvas(bezierPoint(path.points, Math.min(t + 0.035, 1)));
+        const dx = nx.x - b.x, dy = nx.y - b.y, ln = Math.hypot(dx, dy);
+        if (ln < 0.5) continue;
+        const ux = dx/ln, uy = dy/ln, sz = 5;
+        ctx.beginPath();
+        ctx.moveTo(b.x + ux*sz - uy*sz*0.65, b.y + uy*sz + ux*sz*0.65);
+        ctx.lineTo(b.x + ux*sz, b.y + uy*sz);
+        ctx.lineTo(b.x + ux*sz + uy*sz*0.65, b.y + uy*sz - ux*sz*0.65);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+
+      // heading indicators (selected path only)
+      if (sel) {
+        ctx.strokeStyle = "rgba(190,220,255,0.55)"; ctx.lineWidth = 1.5;
+        for (let s = 0; s <= 8; s++) {
+          const t = s / 8;
+          const b = toCanvas(bezierPoint(path.points, t));
+          const rad = headingAt(path, t) * Math.PI / 180;
+          ctx.beginPath();
+          ctx.moveTo(b.x, b.y);
+          ctx.lineTo(b.x + Math.cos(rad)*13, b.y - Math.sin(rad)*13);
+          ctx.stroke();
+        }
       }
     }
-    // control polygon + handles
-    ctx.strokeStyle = "#2a3547"; ctx.setLineDash([4, 4]); ctx.beginPath();
-    path.points.forEach((p, i) => { const c = toCanvas(p); if (i === 0) ctx.moveTo(c.x, c.y); else ctx.lineTo(c.x, c.y); });
-    ctx.stroke(); ctx.setLineDash([]);
+
+    // control polygon
+    ctx.strokeStyle = col; ctx.globalAlpha = sel ? 0.3 : 0.12;
+    ctx.setLineDash([3,5]); ctx.lineWidth = 1;
+    ctx.beginPath();
+    path.points.forEach((p,i) => { const c=toCanvas(p); i===0?ctx.moveTo(c.x,c.y):ctx.lineTo(c.x,c.y); });
+    ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+
+    // handles
     path.points.forEach((p, i) => {
       const c = toCanvas(p);
-      const endpoint = i === 0 || i === path.points.length - 1;
-      ctx.fillStyle = sel ? (endpoint ? "#3fa7ff" : "#cfe6ff") : "#7c8a9b";
-      ctx.beginPath(); ctx.arc(c.x, c.y, endpoint ? 7 : 5, 0, Math.PI * 2); ctx.fill();
+      const ep = (i === 0 || i === path.points.length - 1);
+      const r = ep ? (SCALE > 3.5 ? 7 : 5.5) : (SCALE > 3.5 ? 5 : 4);
+      if (ep) {
+        ctx.fillStyle = sel ? col : "#3a4e66";
+        ctx.beginPath(); ctx.arc(c.x,c.y,r,0,Math.PI*2); ctx.fill();
+        // label
+        ctx.fillStyle = "rgba(215,235,255,0.9)";
+        ctx.font = `bold ${Math.max(8, SCALE*2.6)}px system-ui`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(i === 0 ? `P${pi}` : `${pi}→`, c.x, c.y - r - 7);
+      } else {
+        ctx.fillStyle = sel ? "rgba(190,220,255,0.7)" : "rgba(80,105,130,0.5)";
+        ctx.beginPath(); ctx.arc(c.x,c.y,r,0,Math.PI*2); ctx.fill();
+        ctx.strokeStyle = sel ? col : "#3a4e66"; ctx.lineWidth = 1.5; ctx.stroke();
+      }
     });
   });
-}
-function drawRobot(x, y, hDeg, color) {
-  const c = toCanvas({ x, y }); const h = hDeg * Math.PI / 180;
-  ctx.fillStyle = color; ctx.beginPath(); ctx.arc(c.x, c.y, 6, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = color; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(c.x + Math.cos(h) * 18, c.y - Math.sin(h) * 18); ctx.stroke();
+
+  // robot footprint at start
+  drawRobot(state.start.x, state.start.y, state.start.h);
 }
 
-// ---------- interaction ----------
-let drag = null; // {pi, i}
+function drawRobot(x, y, hDeg) {
+  const c = toCanvas({x, y}), h = hDeg * Math.PI / 180;
+  const w = ((state.robot && state.robot.width)  || 18) * SCALE / 2;
+  const l = ((state.robot && state.robot.length) || 18) * SCALE / 2;
+  ctx.save();
+  ctx.translate(c.x, c.y); ctx.rotate(-h);
+  ctx.strokeStyle = "#2ecc71"; ctx.lineWidth = 2; ctx.globalAlpha = 0.65;
+  ctx.setLineDash([4,3]); ctx.strokeRect(-w,-l,w*2,l*2); ctx.setLineDash([]);
+  // front notch
+  ctx.globalAlpha = 1; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(-w*0.35,-l); ctx.lineTo(0,-l*0.5); ctx.lineTo(w*0.35,-l); ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = "#2ecc71";
+  ctx.beginPath(); ctx.arc(c.x,c.y,4,0,Math.PI*2); ctx.fill();
+}
+
+// ===== INTERACTION =====
+let drag = null;
 function hitTest(cx, cy) {
-  const path = state.paths[state.selected];
-  if (!path) return null;
-  for (let i = 0; i < path.points.length; i++) {
-    const c = toCanvas(path.points[i]);
-    if (Math.hypot(c.x - cx, c.y - cy) <= 9) return { pi: state.selected, i };
+  const check = [state.selected, ...state.paths.map((_,i)=>i).filter(i=>i!==state.selected)];
+  for (const pi of check) {
+    const path = state.paths[pi]; if (!path) continue;
+    for (let i = 0; i < path.points.length; i++) {
+      const c = toCanvas(path.points[i]);
+      if (Math.hypot(c.x-cx, c.y-cy) <= 10) return {pi, i};
+    }
   }
   return null;
 }
 function canvasXY(e) {
   const r = canvas.getBoundingClientRect();
-  return { x: (e.clientX - r.left) * (canvas.width / r.width),
-           y: (e.clientY - r.top) * (canvas.height / r.height) };
+  return { x: (e.clientX-r.left)*(canvas.width/r.width),
+           y: (e.clientY-r.top)*(canvas.height/r.height) };
 }
 canvas.addEventListener("pointerdown", e => {
-  const { x, y } = canvasXY(e);
+  const {x,y} = canvasXY(e);
   const hit = hitTest(x, y);
-  if (hit) { drag = hit; canvas.setPointerCapture(e.pointerId); return; }
-  const path = state.paths[state.selected];
-  if (!path) return;
+  if (hit) {
+    drag = hit; canvas.setPointerCapture(e.pointerId);
+    if (hit.pi !== state.selected) { state.selected = hit.pi; sync(); }
+    return;
+  }
+  const path = state.paths[state.selected]; if (!path) return;
   const f = toField(x, y);
-  path.points.push({ x: round1(f.x), y: round1(f.y) });
+  path.points.push({x: round1(f.x), y: round1(f.y)});
   sync();
 });
 canvas.addEventListener("pointermove", e => {
-  const { x, y } = canvasXY(e);
+  const {x,y} = canvasXY(e);
   const f = toField(x, y);
-  document.getElementById("readout").textContent = `cursor: x ${round1(f.x)}, y ${round1(f.y)}`;
-  if (drag) {
-    state.paths[drag.pi].points[drag.i] = { x: round1(f.x), y: round1(f.y) };
-    sync();
-  }
+  const rd = document.getElementById("readout");
+  if (rd) rd.textContent = `cursor: x ${round1(f.x)}", y ${round1(f.y)}"`;
+  if (drag) { state.paths[drag.pi].points[drag.i] = {x:round1(f.x),y:round1(f.y)}; sync(); }
 });
 canvas.addEventListener("pointerup", () => { drag = null; });
 canvas.addEventListener("dblclick", e => {
-  const { x, y } = canvasXY(e);
+  const {x,y} = canvasXY(e);
   const hit = hitTest(x, y);
-  if (hit) { state.paths[hit.pi].points.splice(hit.i, 1); sync(); }
+  if (hit) { state.paths[hit.pi].points.splice(hit.i,1); sync(); }
 });
-
-// ---------- path list UI ----------
-function lastEndpoint() {
-  for (let i = state.paths.length - 1; i >= 0; i--) {
-    const pts = state.paths[i].points;
-    if (pts.length) return pts[pts.length - 1];
-  }
-  return { x: state.start.x, y: state.start.y };
-}
-function addPath() {
-  const startPt = lastEndpoint();
-  state.paths.push({
-    points: [{ x: startPt.x, y: startPt.y }],
-    heading: { mode: "tangent", a: 0, b: 0 },
-  });
-  state.selected = state.paths.length - 1;
-  sync();
-}
-function renderList() {
-  const list = document.getElementById("pathList");
-  list.innerHTML = "";
-  if (!state.paths.length) { list.innerHTML = '<span class="hint">No paths yet. Click “Add path”.</span>'; return; }
-  state.paths.forEach((path, pi) => {
-    const div = document.createElement("div");
-    div.className = "pathItem" + (pi === state.selected ? " sel" : "");
-    const modes = ["tangent", "reverse", "linear", "constant"]
-      .map(m => `<option value="${m}" ${path.heading.mode === m ? "selected" : ""}>${m}</option>`).join("");
-    const needA = path.heading.mode === "linear" || path.heading.mode === "constant";
-    const needB = path.heading.mode === "linear";
-    div.innerHTML = `
-      <div class="pathHead">
-        <strong>Path ${pi}</strong>
-        <span class="pill">${path.points.length} pts</span>
-      </div>
-      <div class="row">
-        <label>heading</label>
-        <select data-act="mode" data-pi="${pi}">${modes}</select>
-        ${needA ? `<label>${path.heading.mode === "linear" ? "start°" : "°"}</label><input type="number" data-act="a" data-pi="${pi}" value="${path.heading.a}">` : ""}
-        ${needB ? `<label>end°</label><input type="number" data-act="b" data-pi="${pi}" value="${path.heading.b}">` : ""}
-      </div>
-      <div class="row">
-        <button data-act="select" data-pi="${pi}">Select</button>
-        <button data-act="delete" data-pi="${pi}">Delete</button>
-      </div>`;
-    list.appendChild(div);
-  });
-  list.querySelectorAll("[data-act]").forEach(el => {
-    const pi = +el.dataset.pi, act = el.dataset.act;
-    if (el.tagName === "SELECT") el.addEventListener("change", () => { state.paths[pi].heading.mode = el.value; sync(); });
-    else if (el.tagName === "INPUT") el.addEventListener("input", () => { state.paths[pi].heading[act] = parseFloat(el.value) || 0; sync(); });
-    else el.addEventListener("click", () => {
-      if (act === "select") state.selected = pi;
-      else if (act === "delete") { state.paths.splice(pi, 1); state.selected = Math.max(0, state.selected - (pi <= state.selected ? 1 : 0)); }
-      sync();
-    });
-  });
-}
-
-// ---------- java codegen ----------
-function fmt(v) { return Number.isInteger(v) ? v.toFixed(1) : String(v); }
-function genJava() {
-  const validPaths = state.paths.filter(p => p.points.length >= 2);
-  const lines = [];
-  lines.push(`// Auto-generated by Path Planner. Field inches, heading degrees CCW.`);
-  lines.push(`localization.setStartingPose(new Pose2d(${fmt(state.start.x)}, ${fmt(state.start.y)}, ` +
-             `Rotation2d.fromDegrees(${fmt(state.start.h)})));`);
-  lines.push("");
-  validPaths.forEach((path, idx) => {
-    const cps = path.points.map(p => `        new Translation2d(${fmt(p.x)}, ${fmt(p.y)})`).join(",\n");
-    let headingCall;
-    switch (path.heading.mode) {
-      case "constant": headingCall = `.setConstantHeading(Math.toRadians(${fmt(path.heading.a)}))`; break;
-      case "linear":   headingCall = `.setLinearHeading(Math.toRadians(${fmt(path.heading.a)}), Math.toRadians(${fmt(path.heading.b)}))`; break;
-      case "reverse":  headingCall = `.setReverseTangentHeading()`; break;
-      default:         headingCall = `.setTangentHeading()`;
-    }
-    lines.push(`Path path${idx} = new Path(new BezierCurve(`);
-    lines.push(cps + "))");
-    lines.push(`        ${headingCall};`);
-  });
-  lines.push("");
-  if (validPaths.length) {
-    const names = validPaths.map((_, i) => `path${i}`).join(", ");
-    lines.push(`PathChain chain = new PathChain(${names});`);
-    lines.push(`follower.followPath(chain);`);
-  } else {
-    lines.push(`// Add at least one path with 2+ control points.`);
-  }
-  return lines.join("\n");
-}
-
-// ---------- flip (mirror to the other alliance side) ----------
-// axis "x": mirror left/right (negate X). A heading θ becomes 180 - θ.
-// axis "y": mirror top/bottom (negate Y). A heading θ becomes -θ.
-// Tangent/reverse headings are geometric, so they recompute correctly once the
-// points are mirrored; only stored angles (constant/linear) need flipping.
-function flipPoint(p, axis) {
-  return { x: axis === "x" ? -p.x : p.x, y: axis === "y" ? -p.y : p.y };
-}
-function flipHeading(h, axis) {
-  return shortest(axis === "x" ? 180 - h : -h);
-}
-function flipPlan(axis) {
-  const s = flipPoint(state.start, axis);
-  state.start = { x: round1(s.x), y: round1(s.y), h: round1(flipHeading(state.start.h, axis)) };
-  state.paths.forEach(path => {
-    path.points = path.points.map(p => { const q = flipPoint(p, axis); return { x: round1(q.x), y: round1(q.y) }; });
-    if (path.heading.mode === "constant") {
-      path.heading.a = round1(flipHeading(path.heading.a, axis));
-    } else if (path.heading.mode === "linear") {
-      path.heading.a = round1(flipHeading(path.heading.a, axis));
-      path.heading.b = round1(flipHeading(path.heading.b, axis));
-    }
-  });
-  document.getElementById("startX").value = state.start.x;
-  document.getElementById("startY").value = state.start.y;
-  document.getElementById("startH").value = state.start.h;
-  sync();
-}
-
-// ---------- glue ----------
-function sync() {
-  state.start.x = parseFloat(document.getElementById("startX").value) || 0;
-  state.start.y = parseFloat(document.getElementById("startY").value) || 0;
-  state.start.h = parseFloat(document.getElementById("startH").value) || 0;
-  renderList();
-  draw();
-  document.getElementById("code").value = genJava();
-}
-document.getElementById("addPath").addEventListener("click", addPath);
-document.getElementById("clearAll").addEventListener("click", () => { state.paths = []; state.selected = 0; sync(); });
-document.getElementById("flipX").addEventListener("click", () => flipPlan("x"));
-document.getElementById("flipY").addEventListener("click", () => flipPlan("y"));
-["startX", "startY", "startH"].forEach(id => document.getElementById(id).addEventListener("input", sync));
-document.getElementById("copyBtn").addEventListener("click", () => {
-  navigator.clipboard && navigator.clipboard.writeText(document.getElementById("code").value);
-});
-document.getElementById("saveBtn").addEventListener("click", () => {
-  localStorage.setItem("ftcPathPlanner", JSON.stringify(state));
-});
-document.getElementById("loadBtn").addEventListener("click", () => {
-  const raw = localStorage.getItem("ftcPathPlanner");
-  if (!raw) return;
-  const loaded = JSON.parse(raw);
-  state.start = loaded.start; state.paths = loaded.paths; state.selected = loaded.selected || 0;
-  document.getElementById("startX").value = state.start.x;
-  document.getElementById("startY").value = state.start.y;
-  document.getElementById("startH").value = state.start.h;
-  sync();
-});
-
-// ---------- field map glue ----------
-const fieldFileEl = document.getElementById("fieldFile");
-if (fieldFileEl) fieldFileEl.addEventListener("change",
-  e => loadFieldFile(e.target.files && e.target.files[0]));
-const clearFieldEl = document.getElementById("clearField");
-if (clearFieldEl) clearFieldEl.addEventListener("click", () => {
-  fieldImage = null;
-  try { localStorage.removeItem("ftcFieldImage"); } catch (e) {}
-  draw();
-});
-const fieldOpacityEl = document.getElementById("fieldOpacity");
-if (fieldOpacityEl) {
-  fieldOpacityEl.value = fieldOpacity;
-  fieldOpacityEl.addEventListener("input", () => {
-    fieldOpacity = parseFloat(fieldOpacityEl.value) || 0;
-    try { localStorage.setItem("ftcFieldOpacity", String(fieldOpacity)); } catch (e) {}
-    draw();
-  });
-}
 canvas.addEventListener("dragover", e => e.preventDefault());
 canvas.addEventListener("drop", e => {
   e.preventDefault();
@@ -495,19 +673,292 @@ canvas.addEventListener("drop", e => {
   if (f) loadFieldFile(f);
 });
 
-// Restore a previously loaded field image / opacity.
-(function initFieldMap() {
-  const savedOp = localStorage.getItem("ftcFieldOpacity");
-  if (savedOp !== null) fieldOpacity = parseFloat(savedOp) || 0;
-  const savedImg = localStorage.getItem("ftcFieldImage");
-  if (savedImg && typeof Image !== "undefined") {
-    const img = new Image();
-    img.onload = () => { fieldImage = img; draw(); };
-    img.src = savedImg;
+// ===== PATH LIST =====
+function lastEndpoint() {
+  for (let i = state.paths.length-1; i >= 0; i--) {
+    const pts = state.paths[i].points;
+    if (pts.length) return pts[pts.length-1];
   }
+  return {x: state.start.x, y: state.start.y};
+}
+function addPath() {
+  const sp = lastEndpoint();
+  state.paths.push({points:[{x:sp.x,y:sp.y}], heading:{mode:"tangent",a:0,b:0}});
+  state.selected = state.paths.length - 1;
+  sync();
+}
+function renderList() {
+  const list = document.getElementById("pathList");
+  list.innerHTML = "";
+  const meta = document.getElementById("chainMeta");
+  if (!state.paths.length) {
+    list.innerHTML = '<div class="pill" style="padding:4px 0;">No paths yet — click "+ Add Path".</div>';
+    if (meta) meta.textContent = "";
+    return;
+  }
+  const validPaths = state.paths.filter(p=>p.points.length>=2);
+  const totalLen = validPaths.reduce((s,p)=>s+pathLength(p),0);
+  if (meta) meta.textContent = `${state.paths.length} seg · ${totalLen.toFixed(1)}"`;
+
+  state.paths.forEach((path, pi) => {
+    const sel = pi === state.selected;
+    const col = pathColor(pi);
+    const len = pathLength(path);
+    const modes = ["tangent","reverse","linear","constant"]
+      .map(m=>`<option value="${m}"${path.heading.mode===m?" selected":""}>${m}</option>`).join("");
+    const needA = path.heading.mode==="linear"||path.heading.mode==="constant";
+    const needB = path.heading.mode==="linear";
+    const div = document.createElement("div");
+    div.className = "pi" + (sel ? " sel" : "");
+    div.innerHTML = `
+      <div class="pi-hd">
+        <div class="swatch" style="background:${col}"></div>
+        <span class="pi-name">Path ${pi}</span>
+        <span class="pi-meta">${path.points.length} pts · ${len.toFixed(1)}"</span>
+        <button data-act="delete" data-pi="${pi}" class="danger" style="padding:2px 6px;font-size:11px;">✕</button>
+      </div>
+      <div class="row">
+        <span class="lbl">Heading</span>
+        <select data-act="mode" data-pi="${pi}">${modes}</select>
+        ${needA?`<input type="number" data-act="a" data-pi="${pi}" value="${path.heading.a}" style="width:58px;" title="${path.heading.mode==="linear"?"start°":"°"}">`:``}
+        ${needB?`<span class="pill">→</span><input type="number" data-act="b" data-pi="${pi}" value="${path.heading.b}" style="width:58px;" title="end°">`:``}
+      </div>`;
+    list.appendChild(div);
+  });
+
+  list.querySelectorAll("[data-act]").forEach(el => {
+    const pi = +el.dataset.pi, act = el.dataset.act;
+    if (el.tagName==="SELECT")
+      el.addEventListener("change", ()=>{ state.paths[pi].heading.mode=el.value; sync(); });
+    else if (el.tagName==="INPUT")
+      el.addEventListener("input", ()=>{ state.paths[pi].heading[act]=parseFloat(el.value)||0; sync(); });
+    else
+      el.addEventListener("click", ()=>{
+        if (act==="delete") { state.paths.splice(pi,1); state.selected=Math.max(0,state.selected-(pi<=state.selected?1:0)); }
+        sync();
+      });
+  });
+  list.querySelectorAll(".pi").forEach((div,pi)=>{
+    div.addEventListener("click", e=>{
+      if (e.target.closest("[data-act]")) return;
+      state.selected=pi; sync();
+    });
+  });
+}
+
+// ===== JAVA CODEGEN =====
+function genJava() {
+  const validPaths = state.paths.filter(p=>p.points.length>=2);
+  const lines = [];
+  lines.push("// Auto-generated by Path Planner. Field inches, heading degrees CCW.");
+  lines.push(`localization.setStartingPose(new Pose2d(${fmt(state.start.x)}, ${fmt(state.start.y)}, Rotation2d.fromDegrees(${fmt(state.start.h)})));`);
+  lines.push("");
+  validPaths.forEach((path,idx)=>{
+    const cps = path.points.map(p=>`        new Translation2d(${fmt(p.x)}, ${fmt(p.y)})`).join(",\n");
+    let hc;
+    switch(path.heading.mode) {
+      case "constant": hc=`.setConstantHeading(Math.toRadians(${fmt(path.heading.a)}))`; break;
+      case "linear":   hc=`.setLinearHeading(Math.toRadians(${fmt(path.heading.a)}), Math.toRadians(${fmt(path.heading.b)}))`; break;
+      case "reverse":  hc=`.setReverseTangentHeading()`; break;
+      default:         hc=`.setTangentHeading()`;
+    }
+    lines.push(`Path path${idx} = new Path(new BezierCurve(`);
+    lines.push(cps + "))");
+    lines.push(`        ${hc};`);
+    lines.push("");
+  });
+  if (validPaths.length) {
+    lines.push(`PathChain chain = new PathChain(${validPaths.map((_,i)=>`path${i}`).join(", ")});`);
+    lines.push(`follower.followPath(chain);`);
+  } else {
+    lines.push("// Add at least one path with 2+ control points.");
+  }
+  return lines.join("\n");
+}
+
+// ===== GAINS CODEGEN =====
+function fmtG(v) { return parseFloat(v).toString(); }
+function genGainsSnippet() {
+  const g = state.gains;
+  return [
+    "// --- PathConstants values (auto-generated from Path Planner) ---",
+    "// Paste into PathConstants.java, replacing the matching lines.",
+    "",
+    "// Translational PIDF",
+    `public static final double TRANSLATIONAL_kP = ${fmtG(g.tr.kP)};`,
+    `public static final double TRANSLATIONAL_kI = ${fmtG(g.tr.kI)};`,
+    `public static final double TRANSLATIONAL_kD = ${fmtG(g.tr.kD)};`,
+    `public static final double TRANSLATIONAL_kF = ${fmtG(g.tr.kF)};`,
+    "",
+    "// Drive PIDF",
+    `public static final double DRIVE_kP = ${fmtG(g.drive.kP)};`,
+    `public static final double DRIVE_kI = ${fmtG(g.drive.kI)};`,
+    `public static final double DRIVE_kD = ${fmtG(g.drive.kD)};`,
+    `public static final double DRIVE_kF = ${fmtG(g.drive.kF)};`,
+    "",
+    "// Heading PIDF",
+    `public static final double HEADING_kP = ${fmtG(g.head.kP)};`,
+    `public static final double HEADING_kI = ${fmtG(g.head.kI)};`,
+    `public static final double HEADING_kD = ${fmtG(g.head.kD)};`,
+    `public static final double HEADING_kF = ${fmtG(g.head.kF)};`,
+    `public static final double HEADING_CORRECTION_SIGN = ${fmtG(g.headSign)};`,
+    "",
+    `public static final double CENTRIPETAL_SCALE = ${fmtG(g.centripetalScale)};`,
+    `public static final double ZERO_POWER_DECEL_RATE = ${fmtG(g.zeroPowerDecelRate)};`,
+    `public static final double MAX_ROBOT_SPEED = ${fmtG(g.maxRobotSpeed)};`,
+    "",
+    "// Tolerances",
+    `public static final double END_TRANSLATION_TOLERANCE = ${fmtG(g.endTransTol)};`,
+    `public static final double END_HEADING_TOLERANCE = Math.toRadians(${fmtG(g.endHeadTol)});`,
+    `public static final double END_VELOCITY_TOLERANCE = ${fmtG(g.endVelTol)};`,
+    `public static final double ADVANCE_LENGTH_TOLERANCE = ${fmtG(g.advanceLenTol)};`,
+    `public static final double ADVANCE_T = ${fmtG(g.advanceT)};`,
+  ].join("\n");
+}
+
+// ===== FLIP =====
+function flipPoint(p, axis) { return { x: axis==="x"?-p.x:p.x, y: axis==="y"?-p.y:p.y }; }
+function flipHeading(h, axis) { return shortest(axis==="x"?180-h:-h); }
+function flipPlan(axis) {
+  const s = flipPoint(state.start, axis);
+  state.start = {x:round1(s.x), y:round1(s.y), h:round1(flipHeading(state.start.h, axis))};
+  state.paths.forEach(path=>{
+    path.points = path.points.map(p=>{ const q=flipPoint(p,axis); return {x:round1(q.x),y:round1(q.y)}; });
+    if (path.heading.mode==="constant") path.heading.a=round1(flipHeading(path.heading.a,axis));
+    else if (path.heading.mode==="linear") {
+      path.heading.a=round1(flipHeading(path.heading.a,axis));
+      path.heading.b=round1(flipHeading(path.heading.b,axis));
+    }
+  });
+  const sx=document.getElementById("startX"), sy=document.getElementById("startY"), sh=document.getElementById("startH");
+  if(sx)sx.value=state.start.x; if(sy)sy.value=state.start.y; if(sh)sh.value=state.start.h;
+  sync();
+}
+
+// ===== GAINS I/O =====
+function readGains() {
+  const g = state.gains;
+  const n = (id, def) => { const el=document.getElementById(id); return el?parseFloat(el.value)||def:def; };
+  g.tr.kP=n("g_tr_kP",0.04); g.tr.kI=n("g_tr_kI",0); g.tr.kD=n("g_tr_kD",0.01); g.tr.kF=n("g_tr_kF",0);
+  g.drive.kP=n("g_dv_kP",0.04); g.drive.kI=n("g_dv_kI",0); g.drive.kD=n("g_dv_kD",0.01); g.drive.kF=n("g_dv_kF",0);
+  g.head.kP=n("g_hd_kP",0.3); g.head.kI=n("g_hd_kI",0); g.head.kD=n("g_hd_kD",0.08); g.head.kF=n("g_hd_kF",0);
+  g.centripetalScale=n("g_cent",0.0006);
+  g.zeroPowerDecelRate=n("g_decel",30);
+  g.maxRobotSpeed=n("g_maxspd",50);
+  g.endTransTol=n("g_endTr",1); g.endHeadTol=n("g_endHd",2); g.endVelTol=n("g_endVl",2);
+  g.advanceLenTol=n("g_advL",2); g.advanceT=n("g_advT",0.99);
+}
+function writeGains() {
+  const g = state.gains;
+  const s = (id,v) => { const el=document.getElementById(id); if(el) el.value=v; };
+  s("g_tr_kP",g.tr.kP); s("g_tr_kI",g.tr.kI); s("g_tr_kD",g.tr.kD); s("g_tr_kF",g.tr.kF);
+  s("g_dv_kP",g.drive.kP); s("g_dv_kI",g.drive.kI); s("g_dv_kD",g.drive.kD); s("g_dv_kF",g.drive.kF);
+  s("g_hd_kP",g.head.kP); s("g_hd_kI",g.head.kI); s("g_hd_kD",g.head.kD); s("g_hd_kF",g.head.kF);
+  s("g_cent",g.centripetalScale); s("g_decel",g.zeroPowerDecelRate); s("g_maxspd",g.maxRobotSpeed);
+  s("g_endTr",g.endTransTol); s("g_endHd",g.endHeadTol); s("g_endVl",g.endVelTol);
+  s("g_advL",g.advanceLenTol); s("g_advT",g.advanceT);
+  const onId = (g.headSign||0) >= 0 ? "signPos" : "signNeg";
+  ["signPos","signNeg"].forEach(id=>{ const el=document.getElementById(id); if(el) el.classList.toggle("on",id===onId); });
+}
+
+// ===== MAIN SYNC =====
+function sync() {
+  const gv = id => parseFloat((document.getElementById(id)||{value:"0"}).value)||0;
+  state.start.x=gv("startX"); state.start.y=gv("startY"); state.start.h=gv("startH");
+  const rw=(document.getElementById("robotW")||{}).value; if(rw) state.robot.width=parseFloat(rw)||18;
+  const rl=(document.getElementById("robotL")||{}).value; if(rl) state.robot.length=parseFloat(rl)||18;
+  readGains();
+  renderList();
+  draw();
+  const ce=document.getElementById("code"); if(ce) ce.value=genJava();
+}
+
+// ===== TABS =====
+document.querySelectorAll(".tab-btn").forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+    document.querySelectorAll(".tab-pane").forEach(p=>p.classList.remove("active"));
+    btn.classList.add("active");
+    const pane=document.getElementById("tab-"+btn.dataset.tab);
+    if(pane) pane.classList.add("active");
+  });
+});
+
+// ===== EVENT WIRING =====
+const on = (id,ev,fn)=>{ const el=document.getElementById(id); if(el) el.addEventListener(ev,fn); };
+on("addPath","click",addPath);
+on("clearAll","click",()=>{ state.paths=[]; state.selected=0; sync(); });
+on("flipX","click",()=>flipPlan("x")); on("flipY","click",()=>flipPlan("y"));
+on("flipX2","click",()=>flipPlan("x")); on("flipY2","click",()=>flipPlan("y"));
+["startX","startY","startH","robotW","robotL"].forEach(id=>on(id,"input",sync));
+["g_tr_kP","g_tr_kI","g_tr_kD","g_tr_kF",
+ "g_dv_kP","g_dv_kI","g_dv_kD","g_dv_kF",
+ "g_hd_kP","g_hd_kI","g_hd_kD","g_hd_kF",
+ "g_cent","g_decel","g_maxspd",
+ "g_endTr","g_endHd","g_endVl","g_advL","g_advT"
+].forEach(id=>on(id,"input",sync));
+["signPos","signNeg"].forEach(id=>{
+  on(id,"click",()=>{
+    const el=document.getElementById(id);
+    state.gains.headSign=parseFloat(el.dataset.sign);
+    ["signPos","signNeg"].forEach(oid=>{ const oe=document.getElementById(oid); if(oe) oe.classList.toggle("on",oid===id); });
+    sync();
+  });
+});
+on("copyBtn","click",()=>{ const el=document.getElementById("code"); if(el&&navigator.clipboard) navigator.clipboard.writeText(el.value); });
+on("saveBtn","click",()=>{ try{ localStorage.setItem("ftcPathPlanner",JSON.stringify(state)); }catch(e){} });
+on("loadBtn","click",()=>{
+  try {
+    const raw=localStorage.getItem("ftcPathPlanner"); if(!raw) return;
+    const loaded=JSON.parse(raw);
+    if(loaded.start) state.start=loaded.start;
+    if(loaded.paths) state.paths=loaded.paths;
+    if(typeof loaded.selected==="number") state.selected=loaded.selected;
+    if(loaded.robot) state.robot=Object.assign({width:18,length:18},loaded.robot);
+    if(loaded.gains) Object.assign(state.gains,loaded.gains);
+    const sx=document.getElementById("startX"),sy=document.getElementById("startY"),sh=document.getElementById("startH");
+    if(sx)sx.value=state.start.x; if(sy)sy.value=state.start.y; if(sh)sh.value=state.start.h;
+    const rw=document.getElementById("robotW"),rl=document.getElementById("robotL");
+    if(rw)rw.value=state.robot.width; if(rl)rl.value=state.robot.length;
+    writeGains(); sync();
+  }catch(e){}
+});
+on("saveGains","click",()=>{ readGains(); try{localStorage.setItem("ftcPathGains",JSON.stringify(state.gains));}catch(e){} });
+on("loadGains","click",()=>{
+  try{
+    const raw=localStorage.getItem("ftcPathGains"); if(!raw) return;
+    Object.assign(state.gains,JSON.parse(raw)); writeGains(); sync();
+  }catch(e){}
+});
+on("copyGains","click",()=>{
+  readGains();
+  const snippet=genGainsSnippet();
+  const ta=document.getElementById("gainsSnippet");
+  if(ta){ ta.style.display="block"; ta.value=snippet; ta.select(); }
+  if(navigator.clipboard) navigator.clipboard.writeText(snippet);
+});
+
+// ===== FIELD MAP GLUE =====
+on("fieldFile","change",e=>loadFieldFile(e.target.files&&e.target.files[0]));
+on("clearField","click",()=>{ fieldImage=null; try{localStorage.removeItem("ftcFieldImage");}catch(e){} draw(); });
+const fop=document.getElementById("fieldOpacity");
+if(fop){ fop.value=fieldOpacity; fop.addEventListener("input",()=>{ fieldOpacity=parseFloat(fop.value)||0; try{localStorage.setItem("ftcFieldOpacity",String(fieldOpacity));}catch(e){} draw(); }); }
+
+// ===== INIT =====
+if(typeof window!=="undefined") window.addEventListener("resize",()=>{ resizeCanvas(); draw(); });
+
+(function init(){
+  const op=localStorage.getItem("ftcFieldOpacity");
+  if(op!==null) fieldOpacity=parseFloat(op)||0;
+  const img=localStorage.getItem("ftcFieldImage");
+  if(img&&typeof Image!=="undefined"){ const im=new Image(); im.onload=()=>{ fieldImage=im; draw(); }; im.src=img; }
 })();
 
+resizeCanvas();
 sync();
+
+// ===== TEST EXPORTS (Node.js compat) =====
+if(typeof module!=="undefined") module.exports={bezierPoint,genJava,flipPoint,state};
 </script>
 </body>
 </html>

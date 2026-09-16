@@ -62,6 +62,25 @@ tuned on the real robot. Increase `TRANSLATIONAL_kP` if the robot tracks loosely
 raise `CENTRIPETAL_SCALE` if it cuts curves wide; tune `HEADING_kP` for crisp
 turns without oscillation.
 
+### Deceleration feedforward
+
+The drive command is the maximum of a PID output and a physics-based feedforward:
+
+```
+targetSpeed = √(2 · ZERO_POWER_DECEL_RATE · remaining)
+driveMag    = max(targetSpeed / MAX_ROBOT_SPEED, drivePIDOut)
+```
+
+This naturally decelerates the robot to zero at the path end without requiring an
+aggressive `DRIVE_kD`. To measure `ZERO_POWER_DECEL_RATE`: drive the robot at
+full speed, cut motor power, measure stopping distance `d` and entry speed `v`,
+then `decelRate = v² / (2·d)`. Increase it if the robot overshoots endpoints;
+decrease it if braking starts too far out. `MAX_ROBOT_SPEED` is the top speed at
+full drive PID output (inches/sec); it normalizes the feedforward to `[0, 1]`.
+
+Both constants can also be edited in the **Gains** tab of the Path Planner and
+pasted back into `PathConstants.java` via the generated snippet.
+
 ## Path Planner (visual tool)
 
 `assets/pathplanner.html` is a self-contained visual editor. Drag control points

@@ -59,6 +59,23 @@ public final class PathConstants {
      */
     public static final double CENTRIPETAL_SCALE = 0.0006;
 
+    /**
+     * Estimated coast deceleration rate under zero motor power (inches/sec²).
+     * Measure it: drive at full speed, cut power, measure the stopping distance d
+     * and entry speed v → decelRate = v² / (2·d). The Follower uses this to
+     * compute a smooth approach speed (√(2·decelRate·remaining)) so the robot
+     * arrives at the path end with near-zero speed without over-tuning kD.
+     * Tune up (higher) if the robot overshoots path endpoints; down if it
+     * starts braking too far out.
+     */
+    public static final double ZERO_POWER_DECEL_RATE = 30.0;   // inches/sec²
+
+    /**
+     * Approximate top speed under full drive PID output (inches/sec).
+     * Used to normalize the deceleration feedforward to [0, 1].
+     */
+    public static final double MAX_ROBOT_SPEED = 50.0;          // inches/sec
+
     // ----- Completion tolerances -----
     /** Position tolerance to consider the final path finished (inches). */
     public static final double END_TRANSLATION_TOLERANCE = 1.0;

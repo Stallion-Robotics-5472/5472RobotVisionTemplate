@@ -127,11 +127,17 @@ public class Follower {
         double centMag = PathConstants.CENTRIPETAL_SCALE * speed * speed * curvature;
         Translation2d centripetalVec = leftNormal.times(centMag);
 
-        // --- drive along the path (decelerates as remaining -> 0) ---
-        double driveMag = drivePID.calculate(remaining, dt);
-        if (driveMag < 0) {
-            driveMag = 0;
-        }
+        // --- drive along the path ---
+        // Deceleration feedforward: target approach speed = √(2·decelRate·remaining).
+        // This gives a physically-shaped slowdown that brings the robot to zero speed
+        // at the path end. The drive PID output is taken as a floor (whichever is
+        // larger wins), so the PID still helps when remaining is large.
+        double targetApproachSpeed = Math.min(PathConstants.MAX_ROBOT_SPEED,
+                Math.sqrt(2.0 * PathConstants.ZERO_POWER_DECEL_RATE * Math.max(0.0, remaining)));
+        double driveFF = targetApproachSpeed / PathConstants.MAX_ROBOT_SPEED;
+        double drivePIDOut = drivePID.calculate(remaining, dt);
+        if (drivePIDOut < 0) drivePIDOut = 0;
+        double driveMag = Math.max(driveFF, drivePIDOut);
         Translation2d driveVec = tangent.times(driveMag);
 
         // --- combine with corrective priority within the unit budget ---
