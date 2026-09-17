@@ -24,10 +24,11 @@
 <title>FTC Path Planner</title>
 <style>
 :root {
-  --bg: #0e1219; --surface: #141b27; --panel: #19212f;
-  --border: #253042; --ink: #dde6f2; --muted: #6e8299;
-  --accent: #3b9eff; --accent-dim: #1a3f6e;
+  --bg: #090c12; --surface: #111520; --panel: #141922;
+  --border: #1e2b3c; --ink: #e2ecf8; --muted: #5d7899;
+  --accent: #3b9eff; --accent-dim: #162d52;
   --green: #2ecc71; --red: #e74c3c;
+  --red-zone: rgba(210,55,55,0.18); --blue-zone: rgba(45,110,240,0.18);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -39,19 +40,24 @@ body {
 /* ---- canvas side ---- */
 #canvas-col {
   flex: 1; min-width: 0; display: flex; flex-direction: column;
-  background: var(--bg);
+  background: #07090f;
 }
 #canvas-wrap {
   flex: 1; display: flex; align-items: center; justify-content: center;
   overflow: hidden; position: relative; min-height: 0;
+  background: radial-gradient(ellipse at center, #0e1420 0%, #07090f 100%);
 }
-canvas#field { display: block; touch-action: none; cursor: crosshair; }
+canvas#field {
+  display: block; touch-action: none; cursor: crosshair;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px #1a2535, 0 0 32px rgba(0,0,0,0.7), 0 0 60px rgba(20,50,90,0.25);
+}
 #canvas-bar {
   background: var(--surface); border-top: 1px solid var(--border);
   padding: 5px 12px; display: flex; align-items: center; gap: 10px;
   flex-wrap: wrap; flex-shrink: 0;
 }
-#readout { font-size: 12px; color: var(--muted); min-width: 170px; }
+#readout { font-size: 12px; color: var(--muted); min-width: 170px; font-variant-numeric: tabular-nums; }
 .fmap { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .fmap label { color: var(--muted); font-size: 11px; }
 .fmap input[type=range] { width: 80px; accent-color: var(--accent); }
@@ -62,63 +68,77 @@ canvas#field { display: block; touch-action: none; cursor: crosshair; }
   background: var(--panel); border-left: 1px solid var(--border); overflow: hidden;
 }
 #panel-hdr {
-  padding: 11px 16px 9px; border-bottom: 1px solid var(--border);
-  background: var(--surface); flex-shrink: 0;
+  padding: 12px 16px 10px; border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, #141d2e 0%, #111520 100%); flex-shrink: 0;
 }
-#panel-hdr h1 { font-size: 15px; font-weight: 700; }
-#panel-hdr .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+#panel-hdr h1 {
+  font-size: 15px; font-weight: 700; letter-spacing: .3px;
+  background: linear-gradient(90deg, #e2ecf8 60%, #3b9eff);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  display: inline-block;
+}
+#panel-hdr .sub { color: var(--muted); font-size: 11px; margin-top: 3px; }
 .tab-bar {
   display: flex; border-bottom: 1px solid var(--border);
   background: var(--surface); flex-shrink: 0;
 }
 .tab-btn {
-  flex: 1; padding: 8px 4px; font-size: 12px; font-weight: 600;
+  flex: 1; padding: 9px 4px; font-size: 12px; font-weight: 600;
   background: none; border: none; border-bottom: 2px solid transparent;
   color: var(--muted); cursor: pointer; transition: color .15s, border-color .15s;
+  letter-spacing: .2px;
 }
 .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
 .tab-btn:hover:not(.active) { color: var(--ink); }
-#panel-body { flex: 1; overflow-y: auto; }
-.tab-pane { display: none; padding: 11px; }
+#panel-body { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.tab-pane { display: none; padding: 12px; }
 .tab-pane.active { display: block; }
 /* shared components */
 .card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: 8px; padding: 10px; margin-bottom: 9px;
+  border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
 }
 .card-title {
   font-size: 10px; font-weight: 700; color: var(--muted);
-  text-transform: uppercase; letter-spacing: .5px; margin-bottom: 7px;
+  text-transform: uppercase; letter-spacing: .7px; margin-bottom: 8px;
 }
 .row { display: flex; gap: 6px; align-items: center; margin: 5px 0; flex-wrap: wrap; }
 .lbl { color: var(--muted); font-size: 11px; }
 input[type=number], input[type=text], select {
   background: var(--bg); color: var(--ink); border: 1px solid var(--border);
-  border-radius: 5px; padding: 4px 6px; font-size: 12px;
+  border-radius: 5px; padding: 4px 7px; font-size: 12px;
+  transition: border-color .15s;
+}
+input[type=number]:focus, input[type=text]:focus, select:focus {
+  outline: none; border-color: var(--accent);
 }
 input[type=number] { width: 70px; }
 input[type=number].wide { width: 88px; }
 select { padding: 4px 5px; }
 button {
   background: var(--bg); color: var(--ink); border: 1px solid var(--border);
-  border-radius: 5px; padding: 5px 9px; font-size: 12px; cursor: pointer;
-  white-space: nowrap;
+  border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer;
+  white-space: nowrap; transition: border-color .15s, color .15s, background .15s;
 }
 button:hover { border-color: var(--accent); color: var(--accent); }
-button.primary { background: var(--accent); color: #05111f; border-color: var(--accent); font-weight: 700; }
-button.primary:hover { background: #5ab0ff; }
-button.danger { color: var(--red); border-color: var(--red); }
-button.danger:hover { background: var(--red); color: #fff; }
+button.primary {
+  background: var(--accent); color: #04111f; border-color: var(--accent);
+  font-weight: 700; letter-spacing: .2px;
+}
+button.primary:hover { background: #62bcff; border-color: #62bcff; }
+button.danger { color: var(--red); border-color: rgba(231,76,60,0.4); }
+button.danger:hover { background: var(--red); color: #fff; border-color: var(--red); }
 .pill { font-size: 11px; color: var(--muted); }
 /* path list */
 .pi {
-  border: 1px solid var(--border); border-radius: 6px; padding: 8px 9px;
-  margin: 5px 0; cursor: pointer; transition: border-color .15s;
+  border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px;
+  margin: 5px 0; cursor: pointer; transition: border-color .15s, background .15s;
+  background: rgba(255,255,255,0.01);
 }
-.pi.sel { border-color: var(--accent); }
-.pi:hover:not(.sel) { border-color: #2e3e54; }
+.pi.sel { border-color: var(--accent); background: rgba(59,158,255,0.05); }
+.pi:hover:not(.sel) { border-color: #2e3e58; background: rgba(255,255,255,0.02); }
 .pi-hd { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
-.swatch { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .pi-name { font-weight: 600; font-size: 12px; flex: 1; }
 .pi-meta { font-size: 11px; color: var(--muted); }
 /* gains grid */
@@ -130,15 +150,15 @@ button.danger:hover { background: var(--red); color: #fff; }
 .gg .gl { color: var(--ink); font-size: 11px; font-weight: 600; }
 .gg input { width: 100%; min-width: 0; }
 /* sign toggle */
-.sign-tog { display: inline-flex; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
-.sign-tog button { border: none; border-radius: 0; padding: 4px 10px; background: none; color: var(--muted); font-size: 13px; }
+.sign-tog { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.sign-tog button { border: none; border-radius: 0; padding: 4px 11px; background: none; color: var(--muted); font-size: 13px; transition: background .15s, color .15s; }
 .sign-tog button.on { background: var(--accent-dim); color: var(--accent); font-weight: 700; }
 /* code */
 textarea {
   width: 100%; background: var(--bg); color: var(--ink);
   border: 1px solid var(--border); border-radius: 6px;
   font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px;
-  padding: 8px; resize: vertical; line-height: 1.5;
+  padding: 9px; resize: vertical; line-height: 1.55;
 }
 </style>
 </head>
@@ -437,18 +457,79 @@ function drawField() {
 }
 function drawProceduralField() {
   const tile = 24 * SCALE;
-  for (let r = 0; r < 6; r++) for (let c = 0; c < 6; c++) {
-    ctx.fillStyle = ((r + c) % 2 === 0) ? "#131820" : "#0f141c";
-    ctx.fillRect(c * tile, r * tile, tile, tile);
+  const W = canvas.width, H = canvas.height;
+
+  // ── base fill ──
+  ctx.fillStyle = "#090c11";
+  ctx.fillRect(0, 0, W, H);
+
+  // ── foam tiles (6×6 checkerboard) ──
+  for (let r = 0; r < 6; r++) {
+    for (let c = 0; c < 6; c++) {
+      ctx.fillStyle = ((r + c) % 2 === 0) ? "#0f1520" : "#0c111a";
+      ctx.fillRect(c * tile, r * tile, tile, tile);
+    }
   }
-  ctx.strokeStyle = "#090c11"; ctx.lineWidth = 1.5;
+
+  // ── alliance zones (top = Red +Y, bottom = Blue -Y) ──
+  // Red: full top row (row 0)
+  ctx.fillStyle = "rgba(215,45,45,0.16)";
+  ctx.fillRect(0, 0, W, tile);
+  // Blue: full bottom row (row 5)
+  ctx.fillStyle = "rgba(45,105,235,0.16)";
+  ctx.fillRect(0, tile * 5, W, tile);
+
+  // ── alliance station divider lines (mark the 2 driver stations per side) ──
+  // Each station is 2 tiles wide; stations are columns 1-3 and 3-5
+  ctx.lineWidth = 2.5;
+  [[`rgba(215,60,60,0.7)`, 0], [`rgba(60,120,240,0.7)`, 5]].forEach(([col, row]) => {
+    const y = row * tile;
+    ctx.strokeStyle = col;
+    // vertical dividers at 2-tile and 4-tile marks
+    [2, 4].forEach(c => {
+      const x = c * tile;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, row === 0 ? y + tile * 0.6 : y + tile);
+      if (row !== 0) { ctx.moveTo(x, y); ctx.lineTo(x, y + tile * 0.4); }
+      ctx.stroke();
+    });
+  });
+
+  // ── alliance zone labels ──
+  const lsz = Math.max(9, tile * 0.19);
+  ctx.font = `700 ${lsz}px system-ui`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = "rgba(235,90,90,0.7)";
+  ctx.fillText("RED", W * 0.5, tile * 0.5);
+  ctx.fillStyle = "rgba(80,140,255,0.7)";
+  ctx.fillText("BLUE", W * 0.5, tile * 5.5);
+
+  // ── tile seam lines ──
+  ctx.strokeStyle = "rgba(5,8,14,0.9)"; ctx.lineWidth = 1;
   for (let i = 0; i <= 6; i++) {
     const v = i * tile;
-    ctx.beginPath(); ctx.moveTo(v, 0); ctx.lineTo(v, canvas.height); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, v); ctx.lineTo(canvas.width, v); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(v, 0); ctx.lineTo(v, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, v); ctx.lineTo(W, v); ctx.stroke();
   }
-  ctx.strokeStyle = "#3a4d62"; ctx.lineWidth = 5;
-  ctx.strokeRect(2.5, 2.5, canvas.width - 5, canvas.height - 5);
+
+  // ── center cross (faint field origin reference) ──
+  ctx.strokeStyle = "rgba(90,130,185,0.18)"; ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 5]);
+  ctx.beginPath(); ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // ── perimeter wall (outer frame) ──
+  // Shadow layer
+  ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.lineWidth = 10;
+  ctx.strokeRect(5, 5, W - 10, H - 10);
+  // Wall face
+  ctx.strokeStyle = "#2e3e55"; ctx.lineWidth = 5;
+  ctx.strokeRect(2.5, 2.5, W - 5, H - 5);
+  // Inner edge highlight
+  ctx.strokeStyle = "#3d546e"; ctx.lineWidth = 1.5;
+  ctx.strokeRect(5.5, 5.5, W - 11, H - 11);
 }
 
 // ===== BEZIER =====
@@ -497,22 +578,17 @@ function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawField();
 
-  // 24" grid (translucent over any background)
-  ctx.strokeStyle = "rgba(150,175,210,0.12)"; ctx.lineWidth = 1;
-  for (let i = -HALF; i <= HALF; i += 24) {
-    const a = toCanvas({x:i,y:-HALF}), b = toCanvas({x:i,y:HALF});
-    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
-    const c = toCanvas({x:-HALF,y:i}), d = toCanvas({x:HALF,y:i});
-    ctx.beginPath(); ctx.moveTo(c.x,c.y); ctx.lineTo(d.x,d.y); ctx.stroke();
+  // axes (only when no field image)
+  if (!fieldImage || !fieldImage.complete || !fieldImage.naturalWidth) {
+    ctx.strokeStyle = "rgba(100,145,200,0.22)"; ctx.lineWidth = 1.5;
+    const o = toCanvas({x:0,y:0});
+    ctx.beginPath(); ctx.moveTo(o.x,0); ctx.lineTo(o.x,canvas.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,o.y); ctx.lineTo(canvas.width,o.y); ctx.stroke();
   }
-  // axes
-  ctx.strokeStyle = "rgba(140,175,215,0.4)"; ctx.lineWidth = 1.5;
-  const o = toCanvas({x:0,y:0});
-  ctx.beginPath(); ctx.moveTo(o.x,0); ctx.lineTo(o.x,canvas.height); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0,o.y); ctx.lineTo(canvas.width,o.y); ctx.stroke();
-  // tile labels (12", 24", …)
+  // inch labels on tile boundaries
   const lblSize = Math.max(8, SCALE * 2.8);
-  ctx.fillStyle = "rgba(110,140,175,0.4)"; ctx.font = `${lblSize}px system-ui`;
+  ctx.fillStyle = "rgba(100,140,190,0.45)";
+  ctx.font = `${lblSize}px system-ui`;
   ctx.textAlign = "center"; ctx.textBaseline = "top";
   for (let i = -HALF + 24; i < HALF; i += 24) {
     const p = toCanvas({x:i, y:-HALF + 0.5});
@@ -529,10 +605,21 @@ function draw() {
     const col = pathColor(pi);
 
     if (path.points.length >= 2) {
+      // curve glow (selected only)
+      if (sel) {
+        ctx.strokeStyle = col; ctx.lineWidth = 9; ctx.globalAlpha = 0.12;
+        ctx.beginPath();
+        for (let s = 0; s <= 120; s++) {
+          const p = toCanvas(bezierPoint(path.points, s / 120));
+          s === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
       // curve
       ctx.strokeStyle = col;
       ctx.lineWidth = sel ? 3.5 : 2.2;
-      ctx.globalAlpha = sel ? 1.0 : 0.5;
+      ctx.globalAlpha = sel ? 1.0 : 0.55;
       ctx.beginPath();
       for (let s = 0; s <= 120; s++) {
         const p = toCanvas(bezierPoint(path.points, s / 120));
@@ -612,12 +699,20 @@ function drawRobot(x, y, hDeg) {
   const l = ((state.robot && state.robot.length) || 18) * SCALE / 2;
   ctx.save();
   ctx.translate(c.x, c.y); ctx.rotate(-h);
-  ctx.strokeStyle = "#2ecc71"; ctx.lineWidth = 2; ctx.globalAlpha = 0.65;
-  ctx.setLineDash([4,3]); ctx.strokeRect(-w,-l,w*2,l*2); ctx.setLineDash([]);
-  // front notch
-  ctx.globalAlpha = 1; ctx.lineWidth = 2.5;
-  ctx.beginPath(); ctx.moveTo(-w*0.35,-l); ctx.lineTo(0,-l*0.5); ctx.lineTo(w*0.35,-l); ctx.stroke();
+  // glow
+  ctx.strokeStyle = "#2ecc71"; ctx.lineWidth = 7; ctx.globalAlpha = 0.08;
+  ctx.strokeRect(-w,-l,w*2,l*2);
+  // body outline
+  ctx.globalAlpha = 0.75; ctx.lineWidth = 2;
+  ctx.setLineDash([5,3]); ctx.strokeRect(-w,-l,w*2,l*2); ctx.setLineDash([]);
+  // front bar (solid)
+  ctx.globalAlpha = 1; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-w,-l); ctx.lineTo(w,-l); ctx.stroke();
+  // front arrow notch
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-w*0.3,-l); ctx.lineTo(0,-l+l*0.4); ctx.lineTo(w*0.3,-l); ctx.stroke();
   ctx.restore();
+  // center dot
   ctx.fillStyle = "#2ecc71";
   ctx.beginPath(); ctx.arc(c.x,c.y,4,0,Math.PI*2); ctx.fill();
 }
