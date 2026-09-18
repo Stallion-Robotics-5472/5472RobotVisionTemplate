@@ -65,6 +65,32 @@ public class Path {
         return this;
     }
 
+    // ----- heading configuration readback (used by AllianceFlip) -----
+
+    public HeadingMode getHeadingMode() {
+        return headingMode;
+    }
+
+    public boolean isTangentReversed() {
+        return tangentReversed;
+    }
+
+    public double getConstantHeading() {
+        return constantHeading;
+    }
+
+    public double getStartHeading() {
+        return startHeading;
+    }
+
+    public double getEndHeading() {
+        return endHeading;
+    }
+
+    public int getSearchSteps() {
+        return searchSteps;
+    }
+
     // ----- geometry -----
 
     public BezierCurve getCurve() {

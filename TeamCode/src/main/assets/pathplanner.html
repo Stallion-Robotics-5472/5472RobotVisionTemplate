@@ -220,9 +220,8 @@ textarea {
           <button class="danger" id="clearAll">Clear All</button>
         </div>
         <div class="row" style="margin-top:3px;">
-          <button id="flipX" title="Mirror left/right: negate X, heading = 180-h">Flip ⇆ L/R</button>
-          <button id="flipY" title="Mirror top/bottom: negate Y, heading = -h">Flip ⇅ T/B</button>
-          <span class="pill">Mirror to other alliance</span>
+          <button class="primary" id="flipRot" title="Rotate 180° about field center: (x,y)→(−x,−y), heading+180. Correct alliance swap for BIOBUZZ.">⟳ Swap Alliance</button>
+          <span class="pill">180° — red ⇄ blue</span>
         </div>
       </div>
       <div class="card">
@@ -259,14 +258,26 @@ textarea {
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Mirror Plan</div>
+        <div class="card-title">Move Plan to Other Alliance</div>
         <div class="row">
-          <button id="flipX2">Flip ⇆ L/R</button>
-          <button id="flipY2">Flip ⇅ T/B</button>
+          <button class="primary" id="flipRot2">⟳ Rotate 180°</button>
+          <span class="pill">use this one</span>
         </div>
         <div class="pill" style="margin-top:4px;">
-          Mirrors the entire plan — start pose, all control points, and stored
-          heading angles — to the other alliance side.
+          Transforms the whole plan — start pose, every control point and the
+          stored heading angles — onto the other alliance's side.
+          <b>Rotate 180°</b> is the correct swap for BIOBUZZ: rotating the red
+          GARDEN and LOADING ZONE about the field center lands exactly on the
+          blue ones, which neither mirror does.
+        </div>
+        <div class="row" style="margin-top:7px;">
+          <button id="flipX2" title="Reflect across Y axis: negate X, heading = 180−h">Mirror ⇆ L/R</button>
+          <button id="flipY2" title="Reflect across X axis: negate Y, heading = −h">Mirror ⇅ T/B</button>
+        </div>
+        <div class="pill" style="margin-top:4px;">
+          True reflections, for a mirror-symmetric field. These reverse
+          handedness — a path that curved left will curve right — so they are
+          <b>not</b> an alliance swap on BIOBUZZ.
         </div>
       </div>
     </div>
@@ -885,6 +896,12 @@ function genJava() {
   if (validPaths.length) {
     lines.push(`PathChain chain = new PathChain(${validPaths.map((_,i)=>`path${i}`).join(", ")});`);
     lines.push(`follower.followPath(chain);`);
+    lines.push("");
+    lines.push("// To run this same plan as the other alliance, flip it at run time");
+    lines.push("// instead of authoring a second copy (see AllianceAutoExample):");
+    lines.push("//   Alliance authoredFor = Alliance." + (state.start.x <= 0 ? "RED" : "BLUE") + ";   // this plan's side");
+    lines.push("//   Pose2d    start = AllianceFlip.forAlliance(START, authoredFor, selected);");
+    lines.push("//   PathChain toRun = AllianceFlip.forAlliance(chain, authoredFor, selected);");
   } else {
     lines.push("// Add at least one path with 2+ control points.");
   }
@@ -932,8 +949,22 @@ function genGainsSnippet() {
 }
 
 // ===== FLIP =====
-function flipPoint(p, axis) { return { x: axis==="x"?-p.x:p.x, y: axis==="y"?-p.y:p.y }; }
-function flipHeading(h, axis) { return shortest(axis==="x"?180-h:-h); }
+// Field symmetry used to move a plan to the other alliance.
+//   "rot180" - 180 deg about field center. Correct for BIOBUZZ (and most recent
+//              FTC fields): rotating the red GARDEN / LOADING ZONE lands exactly
+//              on the blue ones, which neither mirror does.
+//   "x"/"y"  - true reflections. Only right on a mirror-symmetric field, and
+//              they reverse handedness (a left curve becomes a right curve).
+function flipPoint(p, sym) {
+  if (sym === "x") return { x: -p.x, y:  p.y };
+  if (sym === "y") return { x:  p.x, y: -p.y };
+  return { x: -p.x, y: -p.y };            // rot180
+}
+function flipHeading(h, sym) {
+  if (sym === "x") return shortest(180 - h);
+  if (sym === "y") return shortest(-h);
+  return shortest(h + 180);               // rot180
+}
 function flipPlan(axis) {
   const s = flipPoint(state.start, axis);
   state.start = {x:round1(s.x), y:round1(s.y), h:round1(flipHeading(state.start.h, axis))};
@@ -1003,7 +1034,7 @@ document.querySelectorAll(".tab-btn").forEach(btn=>{
 const on = (id,ev,fn)=>{ const el=document.getElementById(id); if(el) el.addEventListener(ev,fn); };
 on("addPath","click",addPath);
 on("clearAll","click",()=>{ state.paths=[]; state.selected=0; sync(); });
-on("flipX","click",()=>flipPlan("x")); on("flipY","click",()=>flipPlan("y"));
+on("flipRot","click",()=>flipPlan("rot180")); on("flipRot2","click",()=>flipPlan("rot180"));
 on("flipX2","click",()=>flipPlan("x")); on("flipY2","click",()=>flipPlan("y"));
 ["startX","startY","startH","robotW","robotL"].forEach(id=>on(id,"input",sync));
 ["g_tr_kP","g_tr_kI","g_tr_kD","g_tr_kF",
@@ -1082,7 +1113,7 @@ resizeCanvas();
 sync();
 
 // ===== TEST EXPORTS (Node.js compat) =====
-if(typeof module!=="undefined") module.exports={bezierPoint,genJava,flipPoint,state};
+if(typeof module!=="undefined") module.exports={bezierPoint,genJava,flipPoint,flipHeading,flipPlan,headingAt,state};
 </script>
 </body>
 </html>

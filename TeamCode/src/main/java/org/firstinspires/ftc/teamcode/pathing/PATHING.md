@@ -104,13 +104,93 @@ To use it:
 - **Locally** — you can also just open `assets/pathplanner.html` in any browser;
   it has no server dependency.
 
-### Flip to the other alliance side
+### Swap to the other alliance
 
-**Flip ⇆** mirrors the whole plan left/right (negate X); **Flip ⇅** mirrors it
-top/bottom (negate Y). Both transform the start pose, every control point, and
-the stored headings (tangent/reverse headings recompute from the mirrored
-points automatically). Build your auto for one alliance, click flip, and copy
-the mirrored Java for the other side.
+**⟳ Swap Alliance** rotates the whole plan 180° about the field center — start
+pose, every control point, and the stored heading angles. Click it again to go
+back; it's an exact round trip. The generated Java includes a comment showing
+the `AllianceFlip` call to do the same thing at run time.
+
+Two true mirrors (**Mirror ⇆ L/R**, **Mirror ⇅ T/B**) live in the Robot tab for
+fields that really are mirror-symmetric. They reverse handedness, so they are
+*not* an alliance swap on BIOBUZZ — see below.
+
+## Coordinate system and alliances
+
+**There is one field frame and it never changes.** Origin at the field center,
++X right, +Y away from the audience, heading CCW, inches. This is the same frame
+the AprilTag map uses, so `Localization` returns absolute poses: a robot parked
+on a given tile reports the same pose whether it's red or blue, and whichever
+side it started on. Nothing in the follower, the paths, or the gains is
+alliance-dependent.
+
+Two things *do* depend on the alliance, and they're kept separate from the frame:
+
+### 1. The driver's point of view (TeleOp)
+
+The two drive teams stand at opposite ends of the field, so "push the stick away
+from me" is +X for red and −X for blue. `Alliance.driverForward()` supplies that
+offset, and `FieldCentricDrive` rotates the stick vector by it before handing a
+field-frame command to the drivetrain:
+
+```
+driver frame --(alliance.driverForward())--> field frame --(−heading)--> robot
+```
+
+The pose estimate is untouched. If your drive team stands somewhere else,
+`driverForward()` is the single value to change.
+
+`FieldCentricDrive` also has a re-zero button (**back**) that redefines the
+driver's forward as the robot's current facing, to recover from a bad heading
+without restarting.
+
+### 2. Which side an auto runs on
+
+Author the auto once, then flip it at run time with `AllianceFlip`:
+
+```java
+private static final Alliance AUTHORED_FOR = Alliance.RED;
+private static final Pose2d START = new Pose2d(-58, -58, Rotation2d.fromDegrees(45));
+
+// after the driver picks `alliance` during init:
+Pose2d    start = AllianceFlip.forAlliance(START,       AUTHORED_FOR, alliance);
+PathChain toRun = AllianceFlip.forAlliance(buildPlan(), AUTHORED_FOR, alliance);
+localization.setStartingPose(start);
+follower.followPath(toRun);
+```
+
+`forAlliance` returns the original object untouched when the alliances match, so
+there's no cost on your home side. See `opmodes/AllianceAutoExample`.
+
+TANGENT paths need no heading data adjustment — the tangent is recomputed from
+the transformed control points. CONSTANT and LINEAR headings are transformed
+explicitly. Curvature (and so the centripetal correction) is also derived from
+the transformed points, so it stays correct even under a handedness-reversing
+mirror.
+
+### Why 180° rotation and not a mirror
+
+`FieldSymmetry.ROTATIONAL` is the default because BIOBUZZ's alliance halves are
+rotations of each other, not reflections. Checked against the Competition Manual
+field coordinates — rotating red's elements 180° lands exactly on blue's, while
+neither mirror does:
+
+| red element  | red coords                    | rot 180° →            | blue actual           |
+|--------------|-------------------------------|-----------------------|-----------------------|
+| GARDEN       | x −70.5..−47.4, y −70.0..−68.0 | x 47.4..70.5, y 68..70 | x 47.4..70.5, y 68..70 |
+| LOADING ZONE | x −70.5..−59.5, y 23.9..46.6  | x 59.5..70.5, y −46.6..−23.9 | x 59.5..70.5, y −46.6..−23.9 |
+
+A left/right mirror would put red's garden at the *bottom*-right instead of the
+top-right. Pass an explicit `FieldSymmetry` to any `AllianceFlip` method if a
+future field is genuinely mirror-symmetric.
+
+### Setting the starting pose
+
+Seed `setStartingPose` with the robot's real absolute field pose, not `(0,0,0)`
+— that's the middle of the field. Odometry is dead-reckoned from whatever you
+seed, so a wrong seed means a wrong pose until vision sees a tag and pulls the
+estimate in. The template's example OpModes use `(0,0,0)` as a placeholder;
+replace it with your actual start.
 
 ### Field map
 
