@@ -114,12 +114,19 @@ the mirrored Java for the other side.
 
 ### Field map
 
-The canvas shows a built-in field backdrop (24" foam tiles + perimeter wall) so
-it works out of the box. To plan against the real season field, drop a field
-image onto the canvas (or use the **Field map** file picker) — for example the
-official field PNG from FIRST. The image is stretched to the full 144"×144"
-field, so use a top-down image whose edges are the field perimeter. Adjust the
-**opacity** slider to taste, or click **Use default** to go back to the built-in
-field. Your chosen image and opacity are saved in the browser (localStorage), so
-they persist across reloads and when the page is served from the robot — no
-extra asset or server change is needed.
+The planner ships with the **2026-2027 BIOBUZZ** field as its backdrop
+(`assets/field-biobuzz-2027.png`), so it matches the current season out of the
+box. `PathPlannerServer` registers a route for the image alongside the page, so
+it also renders when served from the robot.
+
+To plan against a different image (a new season, or the official FIRST field
+PNG when you have it), drop the image onto the canvas or use the **Field image**
+file picker. It's stretched to the full 144"×144" field, so use a top-down image
+whose edges are the field perimeter. The **opacity** slider fades it, and
+**Reset** returns to the bundled BIOBUZZ field. A dropped image is saved in the
+browser (localStorage), so it persists across reloads and when the page is
+served from the robot — no extra asset or server change needed.
+
+If the image is ever missing, the planner falls back to drawing a procedural
+field (24" foam tiles, perimeter wall, alliance walls with red at −X and blue at
++X, audience at −Y), so the tool never comes up blank.

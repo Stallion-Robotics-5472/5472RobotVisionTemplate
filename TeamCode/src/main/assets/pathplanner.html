@@ -6,9 +6,12 @@
 
   Field: 144"×144", origin at center, +X right, +Y up, heading° CCW.
 
-  Field image: drag & drop a top-down field photo onto the canvas (or use the
-  file picker at the bottom). Stored in localStorage — persists across reloads
-  and when served from the robot with no extra server step needed.
+  Field image: the 2026-2027 BIOBUZZ field (field-biobuzz-2027.png, shipped
+  beside this file) loads as the default backdrop. Drag & drop any top-down
+  field image onto the canvas to replace it (or use the file picker at the
+  bottom); "Reset" returns to the bundled BIOBUZZ field. A dropped image is
+  stored in localStorage, so it persists across reloads and when served from
+  the robot with no extra server step needed.
 
   Gains panel: all PIDF + centripetal + decel feedforward constants editable in
   the browser. "Copy gains snippet" generates a Java block to paste into
@@ -22,6 +25,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>FTC Path Planner</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%230e1219'/><path d='M2.5 13.5C7 13.5 5.5 4 13.5 2.5' stroke='%233b9eff' stroke-width='2' fill='none' stroke-linecap='round'/></svg>"/>
 <style>
 :root {
   --bg: #090c12; --surface: #111520; --panel: #141922;
@@ -176,8 +180,8 @@ textarea {
       <input type="file" id="fieldFile" accept="image/*">
       <button id="clearField" style="font-size:11px;padding:3px 7px;">Reset</button>
       <label>opacity</label>
-      <input type="range" id="fieldOpacity" min="0" max="1" step="0.05" value="0.85">
-      <span class="pill">or drop image on canvas</span>
+      <input type="range" id="fieldOpacity" min="0" max="1" step="0.05" value="1">
+      <span class="pill">BIOBUZZ 2026-27 loaded · drop an image to replace</span>
     </div>
   </div>
 </div>
@@ -432,12 +436,22 @@ function round1(v) { return Math.round(v * 10) / 10; }
 function fmt(v) { return Number.isInteger(v) ? v.toFixed(1) : String(v); }
 
 // ===== FIELD IMAGE =====
-let fieldImage = null, fieldOpacity = 0.85;
+let fieldImage = null, fieldOpacity = 1.0, usingDefaultField = true;
+// Bundled 2026-2027 BIOBUZZ field backdrop, shipped next to this file.
+const DEFAULT_FIELD_SRC = "field-biobuzz-2027.png";
+
+function loadDefaultField() {
+  if (typeof Image === "undefined") return;
+  const im = new Image();
+  im.onload  = () => { fieldImage = im; usingDefaultField = true; draw(); };
+  im.onerror = () => { fieldImage = null; usingDefaultField = true; draw(); };
+  im.src = DEFAULT_FIELD_SRC;
+}
 function setFieldImage(dataUrl) {
   try { localStorage.setItem("ftcFieldImage", dataUrl); } catch(e) {}
   if (typeof Image === "undefined") return;
   const img = new Image();
-  img.onload = () => { fieldImage = img; draw(); };
+  img.onload = () => { fieldImage = img; usingDefaultField = false; draw(); };
   img.src = dataUrl;
 }
 function loadFieldFile(file) {
@@ -471,39 +485,30 @@ function drawProceduralField() {
     }
   }
 
-  // ── alliance zones (top = Red +Y, bottom = Blue -Y) ──
-  // Red: full top row (row 0)
-  ctx.fillStyle = "rgba(215,45,45,0.16)";
-  ctx.fillRect(0, 0, W, tile);
-  // Blue: full bottom row (row 5)
-  ctx.fillStyle = "rgba(45,105,235,0.16)";
-  ctx.fillRect(0, tile * 5, W, tile);
+  // ── alliance walls: RED at -X (left), BLUE at +X (right) ──
+  // Matches the BIOBUZZ field frame: +X toward the blue alliance wall,
+  // +Y away from the audience.
+  ctx.fillStyle = "rgba(215,45,45,0.15)";
+  ctx.fillRect(0, 0, tile, H);
+  ctx.fillStyle = "rgba(45,105,235,0.15)";
+  ctx.fillRect(tile * 5, 0, tile, H);
 
-  // ── alliance station divider lines (mark the 2 driver stations per side) ──
-  // Each station is 2 tiles wide; stations are columns 1-3 and 3-5
-  ctx.lineWidth = 2.5;
-  [[`rgba(215,60,60,0.7)`, 0], [`rgba(60,120,240,0.7)`, 5]].forEach(([col, row]) => {
-    const y = row * tile;
-    ctx.strokeStyle = col;
-    // vertical dividers at 2-tile and 4-tile marks
-    [2, 4].forEach(c => {
-      const x = c * tile;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x, row === 0 ? y + tile * 0.6 : y + tile);
-      if (row !== 0) { ctx.moveTo(x, y); ctx.lineTo(x, y + tile * 0.4); }
-      ctx.stroke();
-    });
-  });
-
-  // ── alliance zone labels ──
+  // ── alliance wall labels (rotated to run along the wall) ──
   const lsz = Math.max(9, tile * 0.19);
   ctx.font = `700 ${lsz}px system-ui`;
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillStyle = "rgba(235,90,90,0.7)";
-  ctx.fillText("RED", W * 0.5, tile * 0.5);
-  ctx.fillStyle = "rgba(80,140,255,0.7)";
-  ctx.fillText("BLUE", W * 0.5, tile * 5.5);
+  [["RED", "rgba(235,90,90,0.75)", tile * 0.5, -Math.PI/2],
+   ["BLUE", "rgba(80,140,255,0.75)", tile * 5.5, Math.PI/2]].forEach(([txt, col, x, rot]) => {
+    ctx.save();
+    ctx.translate(x, H * 0.5); ctx.rotate(rot);
+    ctx.fillStyle = col; ctx.fillText(txt, 0, 0);
+    ctx.restore();
+  });
+
+  // ── audience side marker (-Y, bottom) ──
+  ctx.font = `600 ${Math.max(8, tile * 0.13)}px system-ui`;
+  ctx.fillStyle = "rgba(110,150,200,0.45)";
+  ctx.fillText("AUDIENCE", W * 0.5, H - tile * 0.22);
 
   // ── tile seam lines ──
   ctx.strokeStyle = "rgba(5,8,14,0.9)"; ctx.lineWidth = 1;
@@ -585,14 +590,29 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(o.x,0); ctx.lineTo(o.x,canvas.height); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(0,o.y); ctx.lineTo(canvas.width,o.y); ctx.stroke();
   }
-  // inch labels on tile boundaries
-  const lblSize = Math.max(8, SCALE * 2.8);
-  ctx.fillStyle = "rgba(100,140,190,0.45)";
-  ctx.font = `${lblSize}px system-ui`;
-  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  // inch labels on tile boundaries, drawn on a dark chip so they stay
+  // legible over a light field image as well as the dark procedural field
+  const lblSize = Math.max(8, Math.min(13, SCALE * 2.2));
+  ctx.font = `600 ${lblSize}px system-ui`;
+  ctx.textBaseline = "middle"; ctx.textAlign = "center";
+  const chip = (txt, cx, cy) => {
+    const w = ctx.measureText(txt).width + 8, h = lblSize + 6, r = 3;
+    const x = cx - w/2, y = cy - h/2;
+    ctx.fillStyle = "rgba(8,12,20,0.7)";
+    ctx.beginPath();
+    ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.fill();
+    ctx.fillStyle = "rgba(205,228,255,0.95)";
+    ctx.fillText(txt, cx, cy);
+  };
   for (let i = -HALF + 24; i < HALF; i += 24) {
-    const p = toCanvas({x:i, y:-HALF + 0.5});
-    ctx.fillText(i, p.x, p.y + 2);
+    const px = toCanvas({x:i, y:-HALF});
+    chip(String(i), px.x, canvas.height - lblSize);
+    const py = toCanvas({x:-HALF, y:i});
+    chip(String(i), lblSize + 6, py.y);
   }
 
   // paths (back-to-front, selected on top)
@@ -1035,7 +1055,7 @@ on("copyGains","click",()=>{
 
 // ===== FIELD MAP GLUE =====
 on("fieldFile","change",e=>loadFieldFile(e.target.files&&e.target.files[0]));
-on("clearField","click",()=>{ fieldImage=null; try{localStorage.removeItem("ftcFieldImage");}catch(e){} draw(); });
+on("clearField","click",()=>{ try{localStorage.removeItem("ftcFieldImage");}catch(e){} fieldImage=null; loadDefaultField(); draw(); });
 const fop=document.getElementById("fieldOpacity");
 if(fop){ fop.value=fieldOpacity; fop.addEventListener("input",()=>{ fieldOpacity=parseFloat(fop.value)||0; try{localStorage.setItem("ftcFieldOpacity",String(fieldOpacity));}catch(e){} draw(); }); }
 
@@ -1043,10 +1063,19 @@ if(fop){ fop.value=fieldOpacity; fop.addEventListener("input",()=>{ fieldOpacity
 if(typeof window!=="undefined") window.addEventListener("resize",()=>{ resizeCanvas(); draw(); });
 
 (function init(){
-  const op=localStorage.getItem("ftcFieldOpacity");
+  let op=null;
+  try{ op=localStorage.getItem("ftcFieldOpacity"); }catch(e){}
   if(op!==null) fieldOpacity=parseFloat(op)||0;
-  const img=localStorage.getItem("ftcFieldImage");
-  if(img&&typeof Image!=="undefined"){ const im=new Image(); im.onload=()=>{ fieldImage=im; draw(); }; im.src=img; }
+  let img=null;
+  try{ img=localStorage.getItem("ftcFieldImage"); }catch(e){}
+  if(img&&typeof Image!=="undefined"){
+    const im=new Image();
+    im.onload=()=>{ fieldImage=im; usingDefaultField=false; draw(); };
+    im.onerror=()=>loadDefaultField();
+    im.src=img;
+  } else {
+    loadDefaultField();
+  }
 })();
 
 resizeCanvas();

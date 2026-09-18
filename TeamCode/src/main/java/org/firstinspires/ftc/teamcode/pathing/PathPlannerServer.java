@@ -34,6 +34,9 @@ public final class PathPlannerServer {
     private static final String ASSET_NAME = "pathplanner.html";
     private static final String ROUTE = "/pathplanner";
 
+    /** Field backdrop the planner page requests as a sibling file. */
+    private static final String FIELD_ASSET = "field-biobuzz-2027.png";
+
     /**
      * Called automatically by the SDK at startup. Registers the planner route.
      * The method must be public static and take (Context, WebHandlerManager).
@@ -41,6 +44,7 @@ public final class PathPlannerServer {
     @WebHandlerRegistrar
     public static void register(Context context, WebHandlerManager manager) {
         final AssetManager assets = context.getAssets();
+
         manager.register(ROUTE, new WebHandler() {
             @Override
             public NanoHTTPD.Response getResponse(NanoHTTPD.IHTTPSession session)
@@ -58,6 +62,22 @@ public final class PathPlannerServer {
                 }
             }
         });
+
+        // The page loads the field image by relative name, so it arrives as a
+        // sibling request. Register both spellings the browser may resolve to.
+        WebHandler fieldHandler = new WebHandler() {
+            @Override
+            public NanoHTTPD.Response getResponse(NanoHTTPD.IHTTPSession session)
+                    throws IOException, NanoHTTPD.ResponseException {
+                InputStream in = assets.open(FIELD_ASSET);
+                NanoHTTPD.Response response = NanoHTTPD.newChunkedResponse(
+                        NanoHTTPD.Response.Status.OK, "image/png", in);
+                response.addHeader("Cache-Control", "max-age=86400");
+                return response;
+            }
+        };
+        manager.register("/" + FIELD_ASSET, fieldHandler);
+        manager.register(ROUTE + "/" + FIELD_ASSET, fieldHandler);
     }
 
     private static String readAsset(AssetManager assets, String name) throws IOException {
