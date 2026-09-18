@@ -64,7 +64,7 @@ smooth enough to drive on.
                                       └───────────────┘
                                               ▲
   Limelight ─── AprilTag pose, when visible ──┘
-  (MegaTag1 botpose)      weighted by distance² / tagCount
+  (MegaTag1 / MegaTag2)   weighted by distance² / tagCount
 ```
 
 That fused pose is what everything else consumes: the path follower steers by
@@ -122,28 +122,115 @@ Per axis, the Kalman gain is
 ```
 
 where `q` is the odometry variance and `r` the vision variance for that frame.
-With the shipped defaults (odometry `0.5″`, vision `2.0″`) the XY gain is
-**0.20** — a frame closes 20 % of the disagreement, so about a dozen consistent
-frames converge it fully. These are measured numbers, not estimates; see
-[Verifying the math](#verifying-the-math).
-
 Vision std devs are computed **per frame**:
 
 ```
     xyStdDev = VISION_XY_STD_DEV_COEFFICIENT · (avgTagDistance² / tagCount)
 ```
 
-Distance hurts quadratically, tag count helps linearly. This is the
-AdvantageKit scaling and it is why a far-off single-tag glimpse cannot yank the
-robot sideways mid-path.
+Distance hurts quadratically, tag count helps linearly. This is the AdvantageKit
+scaling, and it is why a far-off single-tag glimpse cannot yank the robot
+sideways mid-path. With the shipped coefficient that works out to:
+
+| tag distance | tags | std dev | gain |
+|---|---|---|---|
+| 18″ | 2 | 0.08″ | **0.86** — close multi-tag snaps |
+| 40″ | 1 | 0.80″ | 0.38 |
+| 60″ | 2 | 0.90″ | 0.36 |
+| 100″ | 1 | 5.00″ | **0.09** — far single-tag barely nudges |
+
+These are measured, not estimated; the suite prints this table (see
+[Verifying the math](#verifying-the-math)).
+
+> **If you retune that coefficient, mind the units.** AdvantageKit publishes
+> `0.02`, but its distances are in **metres**; this template works in inches and
+> the distance term is *squared*, so the value converts to about `0.0005` rather
+> than carrying across unchanged. Get this wrong and the std devs come out in
+> the hundreds or thousands of inches, the gain collapses to roughly zero, and
+> vision fusion silently stops doing anything — with no outward sign, because
+> odometry keeps the pose looking perfectly plausible.
 
 ### Heading is deliberately gyro-dominated
 
 Heading gets its own, much larger std dev (`VISION_HEADING_STD_DEV`, 45°),
 giving a gain of about **0.04**. The Pinpoint's IMU is excellent over a match and
-MegaTag1's heading from a single tag is not; so the gyro owns heading
-short-term and vision only slowly bleeds off drift. If you would rather vision
-never touch heading, raise this constant further.
+a single-tag heading is not, so the gyro owns heading short-term and vision only
+slowly bleeds off drift. Raise this constant further if you would rather vision
+never touched heading at all.
+
+### MegaTag1 and MegaTag2: which solver, and when
+
+The Limelight offers two AprilTag solvers, and they fail in opposite ways.
+
+**MegaTag1** (`getBotpose`) solves the pose from tag geometry alone. Because it
+never looks at the gyro, it is the only thing in the system that can *check* the
+gyro. Its weakness is **pose ambiguity**: a single tag viewed near head-on has
+two mathematically valid solutions that are mirror images, and the solver can
+pick the wrong one.
+
+**MegaTag2** (`getBotpose_MT2`) takes the yaw you push down via
+`updateRobotOrientation()` and uses it to constrain the solve, which removes the
+ambiguous solution entirely. It is far steadier, especially on one tag and at
+distance. Its weakness is the mirror image of MegaTag1's: the heading it reports
+is just your own yaw handed back, so it can never correct heading drift — and if
+your heading is wrong, it returns a *confidently* wrong position.
+
+So the template uses each for what it is good at:
+
+| | source | why |
+|---|---|---|
+| **Heading** | always MegaTag1 | gyro-independent, so it can audit the gyro |
+| **Position** | MegaTag2, once heading is trusted | immune to ambiguity, given a good heading |
+
+**The heading-trust gate** connects them. MegaTag1's independent heading is
+compared against the current estimate every frame. Agreement for
+`HEADING_TRUST_FRAMES` consecutive frames earns trust and hands position over to
+MegaTag2; a gross disagreement revokes it and drops straight back to MegaTag1,
+which a bad heading cannot poison. The current state shows on telemetry as
+`heading TRUSTED` or `unverified`.
+
+### The 180° problem, and where it actually comes from
+
+The most damaging localization failure in FTC is not drift — it is being
+**seeded backwards**. The causes are mundane: the wrong alliance button at init,
+or the robot physically placed facing the other way.
+
+Note what it is *not*: alliance flipping. The field frame is absolute and
+AprilTags are surveyed into it, so `AllianceFlip` transforms **plans** (paths,
+start poses) and never **measurements**. Vision reads identically whichever
+alliance you are playing.
+
+A backwards seed is nasty because it is quiet. Odometry is self-consistent, the
+pose looks reasonable, and the robot simply drives the wrong way. Heading fusion
+alone will not save you in time: at a 0.04 gain MegaTag1 needs seconds to drag
+180° back, and auto has already run by then.
+
+The template attacks it where it is cheap — **before the match**:
+
+- Alliance-selecting OpModes run the estimator during **init**, while the robot
+  sits still with a clear view of a tag (the best look MegaTag1 will ever get).
+- `getStartPoseCheck()` compares MegaTag1's heading against the seeded one and
+  reports a verdict; `isStartPoseSuspect()` drives a loud telemetry warning.
+- In `FieldCentricDrive`, **Y** calls `seedFromVision()`, snapping the whole pose
+  to what the camera sees. It uses MegaTag1 deliberately, so it can recover a
+  heading the gyro has wrong, and it ignores fixes older than half a second so a
+  stray press cannot corrupt a good pose.
+
+That is deliberately better than a driver-operated "am I facing toward you?"
+button: it needs no judgement under pressure, and it fires before auto rather
+than after it.
+
+### Outlier rejection
+
+A frame landing more than `MAX_POSE_JUMP_IN` from a *settled* estimate is
+dropped — the last defence against an ambiguous solve teleporting the robot
+across the field. Two details keep this from backfiring:
+
+- It only applies once the estimate has settled. At startup a badly seeded
+  estimate is the wrong one and vision is right.
+- If the camera insists on the same disagreement for `JUMP_REJECT_LIMIT` frames,
+  the *estimate* is what is wrong, so rejection latches off until a frame agrees
+  again. Otherwise a wrong pose could reject every correction forever.
 
 ### Latency compensation
 
@@ -347,9 +434,12 @@ applies the same 180° rotation `AllianceFlip` does at run time.
  ┌── Localization.update() ──────────────────────────────────┐
  │  pinpoint.update()            read encoders + IMU         │
  │  poseEstimator.updateWithTime(now, odometryPose)          │
- │  limelight.updateRobotOrientation(heading)                │
+ │  limelight.updateRobotOrientation(heading)   for MegaTag2 │
  │  ── if a frame is available and passes the filters ──     │
+ │      heading from MegaTag1; position from MegaTag2 once   │
+ │        MegaTag1 has vouched for the heading               │
  │      compute per-frame std devs from distance & tag count │
+ │      reject an implausible jump from a settled estimate   │
  │      timestamp it at capture time                         │
  │      poseEstimator.addVisionMeasurement(...)              │
  └───────────────────────────────────────────────────────────┘
@@ -419,15 +509,21 @@ All paths relative to `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/`.
 ./tools/verify/run.sh
 ```
 
-Compiles the SDK-free parts of the codebase against a small stub and runs
-numeric checks — **JDK only, no Android SDK, no Gradle, no robot**. It covers:
+**JDK only — no Android SDK, no Gradle, no robot.** First it typechecks the
+whole TeamCode tree against a hand-written FTC SDK stub, so a compile error
+surfaces without opening Android Studio. Then it runs numeric checks covering:
 
 - the SE(3) camera-offset transform (round trip, orthonormality, pitch-sign
   convention, gimbal-lock guard);
 - the mecanum sign conventions, by running the drivetrain's own mixing through
   forward kinematics and asking what the chassis actually does;
-- the estimator's Kalman gains, convergence, latency compensation, and buffer
-  expiry;
+- the estimator's Kalman gains, convergence, latency compensation and buffer
+  expiry — **including the std devs the real pipeline produces**, not just
+  hand-picked ones;
+- the **heading-trust gate**, by driving the real `Localization` subsystem
+  against synthetic Limelight frames: earning and revoking trust, the
+  MegaTag1 → MegaTag2 switchover, catching a 180° seed, re-seeding from vision,
+  and outlier rejection with its escape hatch;
 - alliance flipping, including that it is an exact involution and that flipped
   tangent headings still match the flipped geometry;
 - a **closed-loop follower simulation** that drives the example path to
@@ -436,8 +532,11 @@ numeric checks — **JDK only, no Android SDK, no Gradle, no robot**. It covers:
   the generator and the Java cannot silently drift apart.
 
 Run it after changing any constant, sign convention or gain. It will not tell
-you the right gains for your hardware, but it will catch a change that makes the
-follower diverge or never terminate.
+you the right gains for your hardware, and the stubs are a hand-written subset
+of the SDK rather than the real thing — so it is a fast safety net, not a
+substitute for building the app before a competition. What it does catch is a
+change that makes the follower diverge, never terminate, or quietly stop
+fusing vision.
 
 ---
 

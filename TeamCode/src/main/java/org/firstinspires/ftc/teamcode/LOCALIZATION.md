@@ -19,14 +19,29 @@ is blended in as an absolute measurement weighted by standard deviations.
 3. **Dynamic std devs (AdvantageKit style)** — Vision XY std dev scales with
    `avgTagDistance² / tagCount`. Close, multi-tag fixes snap the pose; far-away
    or single-tag fixes barely move it.
-4. **Vision pose + gyro-dominant heading fusion** — The vision pose (x/y and
-   heading) comes from **MegaTag1** (`getBotpose()`, derived from tag geometry).
-   Heading is *fused* with the gyro: the gyro/odometry is the backbone (the
-   estimate tracks gyro deltas every loop) and MegaTag1 only slowly corrects
-   heading drift. The large `VISION_HEADING_STD_DEV` keeps the blend heavily
-   weighted toward the gyro (~4% vision per frame), so heading is reactive to
-   odometry and only gently pulled by vision. (We still feed the gyro to the
-   camera via `updateRobotOrientation` so you can switch to MegaTag2 for x/y.)
+4. **MegaTag1 for heading, MegaTag2 for position** — The two solvers fail in
+   opposite ways, so each is used for what it is good at.
+
+   **MegaTag1** (`getBotpose()`) is solved from tag geometry alone. Because it
+   never consults the gyro, it is the only thing that can *check* the gyro — so
+   heading always comes from it. Its weakness is pose ambiguity: a single tag
+   viewed near head-on has two mathematically valid solutions that are mirror
+   images, and the solver can pick the wrong one.
+
+   **MegaTag2** (`getBotpose_MT2()`) uses the yaw we push down via
+   `updateRobotOrientation()` to constrain the solve, eliminating that ambiguous
+   solution. It is much steadier, so position comes from it — but only once the
+   heading is trusted, because MegaTag2 is computed *from* our heading and a
+   wrong heading makes it confidently wrong.
+
+   **The heading-trust gate** decides. MegaTag1's independent heading is compared
+   with the current estimate each frame; `HEADING_TRUST_FRAMES` consecutive
+   agreements earn trust and hand position to MegaTag2, while a gap beyond
+   `HEADING_DISTRUST_THRESHOLD` revokes it and falls back to MegaTag1.
+
+   Heading is *fused* rather than snapped: the gyro/odometry is the backbone and
+   the large `VISION_HEADING_STD_DEV` keeps the blend heavily weighted toward it
+   (~4% vision per frame), so vision only gently corrects drift.
 5. **Latency compensation** — Each frame is timestamped at *capture* time
    (`now − captureLatency − targetingLatency − staleness`). The staleness term
    covers how long the finished result sat on the Robot Controller before we
@@ -35,7 +50,40 @@ is blended in as an absolute measurement weighted by standard deviations.
    odometry was at that instant, applies the correction there, then replays
    newer odometry on top.
 6. **Rejection filters** — Frames are dropped if invalid, too few tags, stale,
-   reporting the field origin (no fix), or off-field.
+   reporting the field origin (no fix), off-field, or landing more than
+   `MAX_POSE_JUMP_IN` from a settled estimate. That last one is the final guard
+   against an ambiguous solve teleporting the robot; it only applies once the
+   estimate has settled (at startup a bad seed is the wrong one, not vision),
+   and it latches off after `JUMP_REJECT_LIMIT` consecutive rejections so a
+   genuinely wrong estimate can still be corrected.
+
+## Catching a flipped start pose
+
+The most damaging failure here is not drift — it is being seeded backwards
+(wrong alliance button, or the robot placed facing the other way). It is quiet:
+odometry stays self-consistent and the robot simply drives the wrong way.
+
+Note this is *not* caused by alliance flipping. AprilTags define one absolute
+field frame, so `AllianceFlip` transforms plans, never measurements; vision
+reads identically for both alliances. What goes wrong is the **seed**.
+
+Heading fusion alone will not rescue you in time — at a ~4% gain, dragging 180°
+back takes seconds, and auto has already run. So the check happens at init:
+
+| Call | Use |
+|------|-----|
+| `getStartPoseCheck()` | human-readable verdict for telemetry |
+| `isStartPoseSuspect()` | true when vision and the seed disagree past `HEADING_SEED_WARN_THRESHOLD` |
+| `isHeadingTrusted()` | has MegaTag1 vouched for the heading yet? |
+| `getHeadingDisagreementDegrees()` | signed gap; near ±180 means seeded backwards |
+| `seedFromVision()` | snap the whole pose to the latest MegaTag1 fix |
+
+`AllianceAutoExample` and `FieldCentricDrive` run the estimator during init and
+display the verdict, so a seeding mistake surfaces while the robot sits still
+with a clear view of a tag — the best look MegaTag1 will ever get. In
+`FieldCentricDrive`, **Y** calls `seedFromVision()` as a last resort; it ignores
+fixes older than `SEED_FROM_VISION_MAX_AGE_S` so a stray press cannot corrupt a
+good pose.
 
 ## File map
 
@@ -131,7 +179,14 @@ does not expose it.
 All knobs are in `VisionConstants`:
 
 - `ODOMETRY_STD_DEVS` — lower = trust odometry more (slower vision correction).
-- `VISION_XY_STD_DEV_COEFFICIENT` — lower = trust vision more.
+- `VISION_XY_STD_DEV_COEFFICIENT` — lower = trust vision more. **Mind the
+  units:** AdvantageKit publishes `0.02` for *metres*; in inches, with the
+  distance term squared, the equivalent is `0.02/39.37 ≈ 0.0005`. Too large a
+  value produces std devs of hundreds of inches, collapses the Kalman gain to
+  ~0, and silently disables vision fusion while the pose still looks plausible.
+- `PREFER_MEGATAG2`, `HEADING_TRUST_FRAMES`, `HEADING_TRUST_TOLERANCE`,
+  `HEADING_DISTRUST_THRESHOLD` — the heading-trust gate.
+- `MAX_POSE_JUMP_IN`, `JUMP_REJECT_LIMIT` — outlier rejection.
 - `VISION_HEADING_STD_DEV` — keep large to let the gyro own heading.
 - `MIN_TAG_COUNT`, `MAX_STALENESS_MS`, `FIELD_*` — rejection thresholds.
 
