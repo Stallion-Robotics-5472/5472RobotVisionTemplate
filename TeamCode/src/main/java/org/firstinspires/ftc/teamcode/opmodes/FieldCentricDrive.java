@@ -21,6 +21,8 @@
  *   right bumper    - hold for slow mode
  *   X / B (in init) - select BLUE / RED alliance
  *   back            - re-zero the field heading to the robot's current facing
+ *   Y               - re-seed the whole pose from what the camera sees
+ *                     (MegaTag1, so it can fix a heading the gyro has wrong)
  *
  * Original implementation for this template.
  */
@@ -67,11 +69,26 @@ public class FieldCentricDrive extends LinearOpMode {
             if (gamepad1.x) {
                 alliance = Alliance.BLUE;
             }
+
+            // Run the estimator during init so the camera can check the seeded
+            // heading while the robot sits still. A heading that is 180 degrees
+            // out makes field-centric drive push the robot the wrong way, and
+            // this is the last cheap moment to catch it.
+            localization.update();
+
             telemetry.addLine("Field-Centric Drive");
             telemetry.addData("Alliance", "%s   (B = red, X = blue)", alliance);
             telemetry.addData("Driver looks toward", "%.0f deg in field frame",
                     alliance.driverForward().getDegrees());
             telemetry.addLine("Start pose " + START_POSE);
+            telemetry.addLine();
+            telemetry.addData("Start pose check", localization.getStartPoseCheck());
+            if (localization.isStartPoseSuspect()) {
+                telemetry.addLine("Hold Y to accept the pose the camera sees.");
+                if (gamepad1.y && localization.seedFromVision()) {
+                    telemetry.addLine("Re-seeded from vision.");
+                }
+            }
             telemetry.update();
         }
 
@@ -81,6 +98,8 @@ public class FieldCentricDrive extends LinearOpMode {
         // driver can recover from a bad heading estimate without restarting.
         Rotation2d headingOffset = new Rotation2d(0.0);
         boolean lastBack = false;
+        boolean lastY = false;
+        String reseedNote = "";
 
         while (opModeIsActive()) {
             localization.update();
@@ -92,6 +111,18 @@ public class FieldCentricDrive extends LinearOpMode {
                         .minus(alliance.driverForward());
             }
             lastBack = gamepad1.back;
+
+            // Last-resort recovery: snap the whole pose to what the camera
+            // currently sees. Uses MegaTag1, which is solved without the gyro,
+            // so it can recover a heading the gyro has wrong. Ignored unless
+            // there is a fresh fix, so a stray press cannot corrupt the pose.
+            if (gamepad1.y && !lastY) {
+                reseedNote = localization.seedFromVision()
+                        ? "re-seeded from vision"
+                        : "re-seed ignored (no fresh tag)";
+                headingOffset = new Rotation2d(0.0);
+            }
+            lastY = gamepad1.y;
 
             // Stick in the driver's own frame: +forward is away from the driver,
             // +left is to the driver's left.
@@ -117,6 +148,9 @@ public class FieldCentricDrive extends LinearOpMode {
             telemetry.addData("Command (field)", "X %.2f  Y %.2f  turn %.2f",
                     fieldVec.getX(), fieldVec.getY(), turn * scale);
             telemetry.addData("Heading used", "%.1f deg", heading.getDegrees());
+            if (!reseedNote.isEmpty()) {
+                telemetry.addData("Y re-seed", reseedNote);
+            }
             localization.addTelemetry(telemetry);
             telemetry.update();
         }

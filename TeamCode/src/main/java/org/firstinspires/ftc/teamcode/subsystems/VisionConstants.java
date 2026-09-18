@@ -151,11 +151,29 @@ public final class VisionConstants {
     public static final double[] DEFAULT_VISION_STD_DEVS = {2.0, 2.0, Math.toRadians(30.0)};
 
     /**
-     * Base XY std dev (inches) used to scale per-frame vision trust. The
-     * AdvantageKit-style scaling multiplies this by (avgTagDistance^2 /
-     * tagCount): farther tags and fewer tags => larger std dev => less trust.
+     * Base XY std dev coefficient used to scale per-frame vision trust:
+     *
+     *     xyStdDev = COEFFICIENT * avgTagDistance^2 / tagCount
+     *
+     * Farther tags and fewer tags give a larger std dev and so less trust.
+     *
+     * UNITS MATTER ENORMOUSLY HERE. AdvantageKit's published value is 0.02,
+     * but its distances are in METRES. This template works in INCHES, and the
+     * distance term is SQUARED, so the coefficient has to be converted rather
+     * than copied across:
+     *
+     *     0.02 m per m^2  ->  0.02 / 39.37  ~=  0.0005 in per in^2
+     *
+     * Using 0.02 (or worse, 2.0) with inches produces std devs of hundreds or
+     * thousands of inches, which drives the Kalman gain to nearly zero and
+     * silently turns vision fusion off altogether -- the pose still looks
+     * plausible because odometry is carrying it, so the failure is easy to miss.
+     *
+     * For a sanity check, this value should put a typical frame's std dev in
+     * the range of a fraction of an inch up close to a handful of inches across
+     * the field. Raise it to trust vision less, lower it to trust vision more.
      */
-    public static final double VISION_XY_STD_DEV_COEFFICIENT = 2.0;
+    public static final double VISION_XY_STD_DEV_COEFFICIENT = 0.0005;
 
     /**
      * Heading std dev (radians) for vision (MegaTag1 heading). Heading is fused
@@ -166,6 +184,91 @@ public final class VisionConstants {
      * Increase to trust the gyro even more; decrease to let vision pull harder.
      */
     public static final double VISION_HEADING_STD_DEV = Math.toRadians(45.0);
+
+    // ---------------------------------------------------------------------
+    // MegaTag1 vs MegaTag2, and the heading-trust gate.
+    //
+    // MegaTag1 (getBotpose) solves the robot pose from tag geometry alone. It
+    // is independent of the gyro, which makes it the ONLY thing that can check
+    // whether the gyro heading is right. Its weakness is pose ambiguity: a
+    // single tag viewed near head-on has two mathematically valid solutions
+    // that are mirror images of each other, and the solver can pick the wrong
+    // one.
+    //
+    // MegaTag2 (getBotpose_MT2) feeds the yaw we push down via
+    // updateRobotOrientation() into the solve, which removes the ambiguous
+    // second solution entirely. It is far steadier, especially on one tag and
+    // at distance. Its weakness is the mirror image of MegaTag1's: the heading
+    // it reports is just our own yaw handed back, so it can never correct
+    // heading drift -- and if our heading is wrong, MegaTag2 returns a
+    // CONFIDENTLY wrong position.
+    //
+    // So we use both: heading always comes from MegaTag1, and position comes
+    // from MegaTag2 only once MegaTag1 has agreed with our heading for a while.
+    // Until then we fall back to MegaTag1 for position too, because a bad
+    // heading poisons MegaTag2 but cannot poison MegaTag1.
+    // ---------------------------------------------------------------------
+
+    /**
+     * Use MegaTag2 for X/Y once the heading is trusted. Set false to stay on
+     * MegaTag1 everywhere (useful for A/B testing, or if your field map or
+     * pipeline does not support MegaTag2).
+     */
+    public static final boolean PREFER_MEGATAG2 = true;
+
+    /**
+     * How many consecutive frames MegaTag1 must agree with our heading before
+     * the heading is considered trustworthy and MegaTag2 takes over position.
+     * At ~30 accepted frames/sec this is well under a second.
+     */
+    public static final int HEADING_TRUST_FRAMES = 10;
+
+    /** MegaTag1-vs-estimate heading gap that still counts as agreement. */
+    public static final double HEADING_TRUST_TOLERANCE = Math.toRadians(20.0);
+
+    /**
+     * MegaTag1-vs-estimate heading gap that revokes trust outright and drops
+     * position back to MegaTag1. Set comfortably below 180 so a flipped seed
+     * trips it immediately.
+     */
+    public static final double HEADING_DISTRUST_THRESHOLD = Math.toRadians(60.0);
+
+    /**
+     * How fresh (seconds) the last vision fix must be for
+     * {@link Localization#seedFromVision()} to act on it. Stops a stale fix from
+     * being snapped to long after the robot has driven away from it.
+     */
+    public static final double SEED_FROM_VISION_MAX_AGE_S = 0.5;
+
+    /**
+     * Heading disagreement that makes the pre-match check shout. A 180-degree
+     * seed error (wrong alliance, robot placed backwards) lands far past this.
+     */
+    public static final double HEADING_SEED_WARN_THRESHOLD = Math.toRadians(45.0);
+
+    // ---------------------------------------------------------------------
+    // Outlier rejection.
+    // ---------------------------------------------------------------------
+    /**
+     * Reject a vision frame that lands more than this far (inches) from the
+     * current estimate. This is the last line of defence against an ambiguous
+     * single-tag solve teleporting the robot across the field.
+     *
+     * Only applied once the estimate has settled (see MIN_FRAMES_BEFORE_JUMP_
+     * REJECT), because at startup a badly seeded estimate is the wrong one and
+     * vision is right.
+     */
+    public static final double MAX_POSE_JUMP_IN = 36.0;
+
+    /** Accepted frames required before jump rejection starts applying. */
+    public static final int MIN_FRAMES_BEFORE_JUMP_REJECT = 10;
+
+    /**
+     * If this many frames in a row are rejected as jumps, accept the next one
+     * anyway. Without this escape hatch a genuinely wrong estimate could
+     * reject every correction forever and never recover.
+     */
+    public static final int JUMP_REJECT_LIMIT = 25;
 
     // ---------------------------------------------------------------------
     // Vision measurement rejection filters.

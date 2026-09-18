@@ -9,10 +9,17 @@
  *     by standard deviations that grow with tag distance and shrink with tag
  *     count, so far-away or single-tag fixes barely move the pose while close,
  *     multi-tag fixes snap it.
- *   - Vision pose comes from MegaTag1 (getBotpose). Heading is fused with the
- *     gyro but heavily biased toward it (large VISION_HEADING_STD_DEV), so the
- *     gyro dominates short-term and vision only slowly corrects heading drift.
- *   - Bad frames (no fix, too few tags, stale, off-field) are rejected.
+ *   - Heading always comes from MegaTag1 (getBotpose), which is solved without
+ *     the gyro and is therefore the only thing that can check the gyro. It is
+ *     fused in but heavily biased toward the gyro (large VISION_HEADING_STD_DEV),
+ *     so the gyro dominates short-term and vision only slowly corrects drift.
+ *   - Position comes from MegaTag2 (getBotpose_MT2) once the heading has been
+ *     vouched for by MegaTag1. MegaTag2 uses our yaw to discard the mirror-image
+ *     solution that makes a single-tag fix ambiguous, so it is much steadier --
+ *     but it is computed FROM our heading, so a wrong heading makes it
+ *     confidently wrong. Until heading is trusted, position stays on MegaTag1.
+ *   - Bad frames (no fix, too few tags, stale, off-field, or an implausible
+ *     jump from the settled estimate) are rejected.
  *   - Vision measurements are timestamped at capture time (now minus the
  *     Limelight pipeline latency and minus how long the result has been
  *     waiting on the Robot Controller) so the estimator can
@@ -51,6 +58,18 @@ public class Localization implements Localizer {
     private String lastVisionReject = "none";
     private int lastTagCount = 0;
     private double lastAvgTagDist = 0.0;
+    private String lastVisionSource = "none";
+
+    // Heading-trust gate. MegaTag2 is only used for position once MegaTag1 --
+    // which is computed without the gyro -- has agreed with our heading for
+    // HEADING_TRUST_FRAMES consecutive frames. See VisionConstants.
+    private boolean headingTrusted = false;
+    private int headingAgreementFrames = 0;
+    private double lastHeadingDisagreement = 0.0;
+
+    // Outlier-rejection bookkeeping.
+    private int acceptedFrames = 0;
+    private int consecutiveJumpRejects = 0;
 
     // Full 3D pose from the most recent valid vision frame. Only x/y/yaw are
     // fused into the 2D estimate (the robot drives on the floor); z/pitch/roll
@@ -85,6 +104,14 @@ public class Localization implements Localizer {
         odometry.setPose(pose);
         poseEstimator.resetPose(pose);
         lastOdometryPose = pose;
+
+        // The new seed is unverified until MegaTag1 vouches for it, and the
+        // settled-estimate outlier gate must not reject the frames that would
+        // correct a bad seed.
+        headingTrusted = false;
+        headingAgreementFrames = 0;
+        acceptedFrames = 0;
+        consecutiveJumpRejects = 0;
     }
 
     /** Runs one fusion cycle. Call once per loop. */
@@ -145,63 +172,103 @@ public class Localization implements Localizer {
             return;
         }
 
-        // MegaTag1 pose: independent vision pose (x/y + heading) from tag geometry.
-        Pose3D botpose = result.getBotpose();
-        if (botpose == null) {
-            lastVisionReject = "null botpose";
+        // ---- MegaTag1: the gyro-INDEPENDENT solve. Always computed, because it
+        // is the only thing that can tell us whether our heading is right. ----
+        Pose3d mt1Pose3d = toRobotPose3d(result.getBotpose());
+        if (mt1Pose3d == null) {
+            lastVisionReject = "no MegaTag1 fix";
             return;
         }
-
-        Position position = botpose.getPosition().toUnit(DistanceUnit.INCH);
-        double xIn = position.x;
-        double yIn = position.y;
-
-        // Vision reports the origin when it has no real fix. Check the raw
-        // botpose here, before any camera-offset transform shifts it away from 0.
-        if (xIn == 0.0 && yIn == 0.0) {
-            lastVisionReject = "origin (no fix)";
-            return;
-        }
-
-        double headingRad = botpose.getOrientation().getYaw(AngleUnit.RADIANS);
-
-        // The Limelight botpose is a full 3D pose. Build it as reported (this is
-        // the camera's field pose when the offset is configured in code, or the
-        // robot's field pose when configured in the Limelight UI).
-        Pose3d reportedPose3d = new Pose3d(
-                xIn, yIn, position.z,
-                botpose.getOrientation().getRoll(AngleUnit.RADIANS),
-                botpose.getOrientation().getPitch(AngleUnit.RADIANS),
-                headingRad);
-
-        // If the camera offset is handled in code, convert the camera's 3D field
-        // pose to the robot-center 3D pose with the inverse SE(3) transform
-        // (forward/left/up + roll/pitch/yaw). Otherwise botpose is already the
-        // robot pose. See VisionConstants for the two configuration options.
-        Pose3d robotPose3d = VisionConstants.APPLY_CAMERA_OFFSET_IN_CODE
-                ? reportedPose3d.transformBy(VisionConstants.ROBOT_TO_CAMERA.inverse())
-                : reportedPose3d;
+        Pose2d mt1Pose = mt1Pose3d.toPose2d();
 
         // Keep the robot-center 3D pose for diagnostics (z, pitch, roll).
-        lastVisionPose3d = robotPose3d;
+        lastVisionPose3d = mt1Pose3d;
         lastVisionPose3dTimestamp = now;
 
-        // MegaTag1 gives an independent x/y AND heading (from tag geometry, not
-        // the gyro). The heading is fused with the gyro but heavily biased toward
-        // it via VISION_HEADING_STD_DEV, so the gyro dominates short-term and
-        // vision only slowly corrects heading drift.
-        Pose2d visionPose = robotPose3d.toPose2d();
-
-        // Off-field results are garbage (checked on the robot-center pose).
-        double limit = VisionConstants.FIELD_HALF_SIZE_IN + VisionConstants.FIELD_MARGIN_IN;
-        if (Math.abs(visionPose.getX()) > limit || Math.abs(visionPose.getY()) > limit) {
+        if (isOffField(mt1Pose)) {
             lastVisionReject = "off field";
             return;
+        }
+
+        // ---- Heading trust gate ----
+        // Compare MegaTag1's independent heading against what we currently
+        // believe. Sustained agreement earns trust (and unlocks MegaTag2);
+        // gross disagreement -- a flipped seed, a 180-degree placement error --
+        // revokes it immediately.
+        double estimateHeading = poseEstimator.getEstimatedPosition().getHeading();
+        lastHeadingDisagreement =
+                shortestAngle(mt1Pose.getHeading() - estimateHeading);
+        double absDisagreement = Math.abs(lastHeadingDisagreement);
+
+        if (absDisagreement > VisionConstants.HEADING_DISTRUST_THRESHOLD) {
+            headingTrusted = false;
+            headingAgreementFrames = 0;
+        } else if (absDisagreement < VisionConstants.HEADING_TRUST_TOLERANCE) {
+            headingAgreementFrames++;
+            if (headingAgreementFrames >= VisionConstants.HEADING_TRUST_FRAMES) {
+                headingTrusted = true;
+            }
+        } else {
+            headingAgreementFrames = 0;
+        }
+
+        // ---- Pick the position source ----
+        // MegaTag2 only once the heading is trusted: it is steadier, but it is
+        // computed FROM our heading, so a wrong heading turns it into a
+        // confidently wrong position. MegaTag1 cannot be poisoned that way.
+        Pose2d positionPose = mt1Pose;
+        lastVisionSource = "MegaTag1";
+        if (VisionConstants.PREFER_MEGATAG2 && headingTrusted) {
+            Pose3d mt2Pose3d = toRobotPose3d(result.getBotpose_MT2());
+            if (mt2Pose3d != null) {
+                Pose2d mt2Pose = mt2Pose3d.toPose2d();
+                if (!isOffField(mt2Pose)) {
+                    positionPose = mt2Pose;
+                    lastVisionSource = "MegaTag2";
+                }
+            }
+        }
+
+        // X/Y from the chosen source, heading always from MegaTag1. The
+        // estimator gains each axis independently, so pairing them is sound --
+        // and it keeps MegaTag2 from feeding our own heading back to us.
+        Pose2d visionPose = new Pose2d(
+                positionPose.getX(), positionPose.getY(), mt1Pose.getRotation());
+
+        // ---- Outlier rejection ----
+        // Last defence against an ambiguous solve teleporting the robot. Only
+        // applied once the estimate has settled: at startup a badly seeded
+        // estimate is the wrong one and vision is right. The consecutive-reject
+        // escape hatch stops a genuinely wrong estimate from rejecting every
+        // correction forever.
+        if (acceptedFrames >= VisionConstants.MIN_FRAMES_BEFORE_JUMP_REJECT) {
+            Pose2d current = poseEstimator.getEstimatedPosition();
+            double jump = Math.hypot(visionPose.getX() - current.getX(),
+                    visionPose.getY() - current.getY());
+            if (jump > VisionConstants.MAX_POSE_JUMP_IN) {
+                if (consecutiveJumpRejects < VisionConstants.JUMP_REJECT_LIMIT) {
+                    consecutiveJumpRejects++;
+                    lastVisionReject = String.format("jump %.0f in", jump);
+                    return;
+                }
+                // Limit reached: the camera has insisted on the same
+                // disagreement for too long, so the ESTIMATE is the thing
+                // that is wrong. Stop rejecting and let vision pull us back.
+                // The counter deliberately stays latched at the limit so
+                // every following frame is accepted too -- releasing one
+                // frame in every JUMP_REJECT_LIMIT would take many seconds
+                // to converge. It resets below once a frame agrees again.
+            } else {
+                consecutiveJumpRejects = 0;
+            }
+        } else {
+            consecutiveJumpRejects = 0;
         }
 
         // Frame accepted: publish its diagnostics.
         lastTagCount = tagCount;
         lastAvgTagDist = result.getBotposeAvgDist();
+        acceptedFrames++;
 
         // Dynamic std devs (AdvantageKit style): trust scales with distance^2 / tagCount.
         double stdDevFactor = (lastAvgTagDist * lastAvgTagDist) / tagCount;
@@ -220,6 +287,45 @@ public class Localization implements Localizer {
         poseEstimator.addVisionMeasurement(visionPose, captureTimestamp, visionStdDevs);
         lastVisionAccepted = true;
         lastVisionReject = "none";
+    }
+
+    /**
+     * Converts a raw Limelight botpose into the robot-center 3D pose, applying
+     * the camera mount transform when it is configured in code. Returns null if
+     * the pose is missing or is the field origin, which is what the Limelight
+     * reports when it has no real fix.
+     */
+    private Pose3d toRobotPose3d(Pose3D botpose) {
+        if (botpose == null) {
+            return null;
+        }
+        Position position = botpose.getPosition().toUnit(DistanceUnit.INCH);
+
+        // Check the RAW botpose for the no-fix sentinel, before any camera
+        // offset shifts it away from exactly zero.
+        if (position.x == 0.0 && position.y == 0.0) {
+            return null;
+        }
+
+        Pose3d reported = new Pose3d(
+                position.x, position.y, position.z,
+                botpose.getOrientation().getRoll(AngleUnit.RADIANS),
+                botpose.getOrientation().getPitch(AngleUnit.RADIANS),
+                botpose.getOrientation().getYaw(AngleUnit.RADIANS));
+
+        return VisionConstants.APPLY_CAMERA_OFFSET_IN_CODE
+                ? reported.transformBy(VisionConstants.ROBOT_TO_CAMERA.inverse())
+                : reported;
+    }
+
+    private static boolean isOffField(Pose2d pose) {
+        double limit = VisionConstants.FIELD_HALF_SIZE_IN + VisionConstants.FIELD_MARGIN_IN;
+        return Math.abs(pose.getX()) > limit || Math.abs(pose.getY()) > limit;
+    }
+
+    /** Wraps an angle to [-pi, pi]. */
+    private static double shortestAngle(double radians) {
+        return Math.atan2(Math.sin(radians), Math.cos(radians));
     }
 
     /**
@@ -289,6 +395,95 @@ public class Localization implements Localizer {
         return nowSeconds - lastVisionPose3dTimestamp;
     }
 
+    // ---------------------------------------------------------------------
+    // Heading integrity: catching a flipped or mis-seeded start pose.
+    // ---------------------------------------------------------------------
+
+    /**
+     * True once MegaTag1 -- which is solved without the gyro -- has agreed with
+     * our heading for long enough to trust it. While false, position falls back
+     * to MegaTag1 because MegaTag2 would inherit the bad heading.
+     */
+    public boolean isHeadingTrusted() {
+        return headingTrusted;
+    }
+
+    /**
+     * Signed gap in degrees between MegaTag1's independent heading and our
+     * current estimate, from the most recent MegaTag1 fix. Near 180 means the
+     * robot is seeded backwards -- almost always the wrong alliance selected,
+     * or the robot placed facing the other way.
+     */
+    public double getHeadingDisagreementDegrees() {
+        return Math.toDegrees(lastHeadingDisagreement);
+    }
+
+    /** Which solver supplied the most recent accepted position. */
+    public String getLastVisionSource() {
+        return lastVisionSource;
+    }
+
+    /** True if vision has ever produced a usable fix this OpMode. */
+    public boolean hasVisionFix() {
+        return lastVisionPose3dTimestamp > Double.NEGATIVE_INFINITY;
+    }
+
+    /**
+     * Pre-match sanity check, meant to be polled during init while the robot
+     * sits still looking at tags -- the best conditions MegaTag1 will ever get,
+     * and the last moment a seeding mistake is cheap to fix.
+     *
+     * Returns a short human-readable verdict for telemetry. Pair it with
+     * {@link #isStartPoseSuspect()} to decide whether to shout.
+     */
+    public String getStartPoseCheck() {
+        if (!isVisionEnabled()) {
+            return "vision disabled - cannot verify start pose";
+        }
+        if (!hasVisionFix()) {
+            return "no tag in view yet - point the camera at a tag";
+        }
+        double gap = Math.abs(getHeadingDisagreementDegrees());
+        if (gap > Math.toDegrees(VisionConstants.HEADING_SEED_WARN_THRESHOLD)) {
+            return String.format(
+                    "*** START POSE LOOKS WRONG: heading is %.0f deg off ***", gap);
+        }
+        return String.format("start pose OK (heading within %.0f deg)", gap);
+    }
+
+    /**
+     * True when vision disagrees with the seeded heading badly enough that the
+     * start pose is probably wrong. Check this during init, not mid-match.
+     */
+    public boolean isStartPoseSuspect() {
+        return isVisionEnabled() && hasVisionFix()
+                && Math.abs(lastHeadingDisagreement)
+                        > VisionConstants.HEADING_SEED_WARN_THRESHOLD;
+    }
+
+    /**
+     * Snaps the whole estimate to the latest MegaTag1 fix, overriding whatever
+     * was seeded. MegaTag1 is used deliberately: it is solved from tag geometry
+     * alone, so it can recover a heading the gyro has wrong.
+     *
+     * Use it from an init-time "accept what the camera sees" button, or as a
+     * driver's last resort. Returns false if there is no usable fix, in which
+     * case nothing is changed.
+     */
+    public boolean seedFromVision() {
+        if (!isVisionEnabled() || !hasVisionFix()) {
+            return false;
+        }
+        // Only act on a fix from the last moment, not one the robot has since
+        // driven away from.
+        if (getVisionPose3dAge(currentTimeSeconds())
+                > VisionConstants.SEED_FROM_VISION_MAX_AGE_S) {
+            return false;
+        }
+        setStartingPose(lastVisionPose3d.toPose2d());
+        return true;
+    }
+
     public PinpointOdometry getOdometry() {
         return odometry;
     }
@@ -313,6 +508,14 @@ public class Localization implements Localizer {
                 odo.getX(), odo.getY(), odo.getRotation().getDegrees());
         telemetry.addData("Vision", "enabled %s | accepted %s | %s",
                 isVisionEnabled(), wasLastVisionAccepted(), getLastVisionReject());
+        telemetry.addData("Vision source", "%s | heading %s | MT1 gap %.0f deg",
+                getLastVisionSource(),
+                isHeadingTrusted() ? "TRUSTED" : "unverified",
+                getHeadingDisagreementDegrees());
+        if (isStartPoseSuspect()) {
+            telemetry.addLine("*** HEADING DISAGREES WITH VISION ***");
+            telemetry.addLine("Wrong alliance, or robot placed backwards?");
+        }
         if (lastVisionPose3dTimestamp > Double.NEGATIVE_INFINITY) {
             Pose2d vis = getVisionPose2d();
             telemetry.addData("Raw Vision 2D", "x %.1f  y %.1f  h %.1f deg  (age %.2fs)",

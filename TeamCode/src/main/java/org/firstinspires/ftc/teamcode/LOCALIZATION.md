@@ -28,7 +28,10 @@ is blended in as an absolute measurement weighted by standard deviations.
    odometry and only gently pulled by vision. (We still feed the gyro to the
    camera via `updateRobotOrientation` so you can switch to MegaTag2 for x/y.)
 5. **Latency compensation** — Each frame is timestamped at *capture* time
-   (`now − captureLatency − targetingLatency`). The estimator looks up where
+   (`now − captureLatency − targetingLatency − staleness`). The staleness term
+   covers how long the finished result sat on the Robot Controller before we
+   read it; without it the frame is timestamped later than it really was. The
+   estimator looks up where
    odometry was at that instant, applies the correction there, then replays
    newer odometry on top.
 6. **Rejection filters** — Frames are dropped if invalid, too few tags, stale,
@@ -57,9 +60,11 @@ is blended in as an absolute measurement weighted by standard deviations.
    upload the current season's field map, and note its index
    (`LIMELIGHT_PIPELINE`, default 0).
 3. **Pinpoint geometry** — Measure your odometry pod offsets and set
-   `PINPOINT_X_OFFSET_MM` / `PINPOINT_Y_OFFSET_MM`, the pod type, and pod
-   directions in `VisionConstants`.
-4. **Coordinate frame** — Vision (`getBotpose_MT2`) returns field coordinates
+   `PINPOINT_X_OFFSET` / `PINPOINT_Y_OFFSET`, the pod type, and pod
+   directions in `VisionConstants`. The offsets are read in
+   `PINPOINT_OFFSET_UNIT` (inches by default) — the numbers and that unit
+   must agree.
+4. **Coordinate frame** — Vision (`getBotpose`, MegaTag1) returns field coordinates
    from the uploaded map; the convention places the origin at field center
    (±72"). Make sure your `setStartingPose` and any field bounds use the same
    frame.
@@ -86,14 +91,16 @@ matters: when the robot rotates, an off-center camera sees the field from a
 shifted position. Pick **one** of these (never both):
 
 - **(A) Recommended** — Enter the camera→robot offset in the Limelight web UI.
-  `getBotpose_MT2()` is then already the robot-center pose. Keep
+  The botpose this code reads is then already the robot-center pose. Keep
   `APPLY_CAMERA_OFFSET_IN_CODE = false`. This is best because MegaTag2 also uses
   the offset internally when solving.
 - **(B) In code (full 3D)** — Leave the Limelight UI offset at zero and set the
   complete mount in `VisionConstants`: `CAMERA_FORWARD_OFFSET_IN`,
   `CAMERA_LEFT_OFFSET_IN`, `CAMERA_UP_OFFSET_IN`, `CAMERA_ROLL_OFFSET_DEG`,
   `CAMERA_PITCH_OFFSET_DEG`, `CAMERA_YAW_OFFSET_DEG`, with
-  `APPLY_CAMERA_OFFSET_IN_CODE = true`. `ROBOT_TO_CAMERA` is then a full 3D
+  `APPLY_CAMERA_OFFSET_IN_CODE = true`. **Mind the pitch sign:** pitch rotates
+  about +Y (left), so a positive pitch tilts the camera *down*. A camera angled
+  15° upward to see tags is `-15.0`. `ROBOT_TO_CAMERA` is then a full 3D
   (SE(3)) transform; the subsystem treats botpose as the camera's 3D field pose
   and recovers the robot-center pose via
   `cameraPose3d.transformBy(ROBOT_TO_CAMERA.inverse())`, then projects to 2D for
@@ -125,9 +132,11 @@ All knobs are in `VisionConstants`:
 
 - `ODOMETRY_STD_DEVS` — lower = trust odometry more (slower vision correction).
 - `VISION_XY_STD_DEV_COEFFICIENT` — lower = trust vision more.
-- `VISION_HEADING_STD_DEV` — keep large to let the gyro own heading (MegaTag2).
+- `VISION_HEADING_STD_DEV` — keep large to let the gyro own heading.
 - `MIN_TAG_COUNT`, `MAX_STALENESS_MS`, `FIELD_*` — rejection thresholds.
 
-The fusion math is verified: a vision frame moves the estimate by exactly the
-Kalman gain toward the measurement, and a large heading std dev leaves heading
-untouched.
+The fusion math is covered by the offline suite in `tools/verify/` — run
+`./tools/verify/run.sh` (JDK only, no robot needed). It checks that a vision
+frame moves the estimate by exactly the Kalman gain, that the heading gain stays
+gyro-dominant (~0.04), that a delayed but agreeing frame leaves the estimate
+alone, and that frames older than the history buffer are dropped.

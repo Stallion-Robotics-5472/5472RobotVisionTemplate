@@ -29,8 +29,14 @@ public class LimelightVision {
 
     /**
      * Tells the Limelight which way the robot is facing so MegaTag2 can resolve
-     * tag geometry. Must be called every loop, before reading the result, with
+     * tag geometry. Must be called every loop, BEFORE reading the result, with
      * the robot's best heading estimate (degrees, field-relative).
+     *
+     * MegaTag2 uses this yaw to discard the mirror-image solution that makes a
+     * single-tag MegaTag1 fix ambiguous. That also means MegaTag2 is only as
+     * good as the yaw you give it: feed it a heading that is 180 degrees out
+     * and it will return a confidently wrong position. Localization therefore
+     * gates MegaTag2 behind a heading-trust check.
      */
     public void updateRobotOrientation(double yawDegrees) {
         limelight.updateRobotOrientation(yawDegrees);

@@ -13,6 +13,16 @@ public class EstimatorTest {
     static boolean near(double a, double b, double tol) { return Math.abs(a - b) <= tol; }
     static double wrap(double r) { return Math.atan2(Math.sin(r), Math.cos(r)); }
 
+    /** The gain PoseEstimator derives from odometry std q and vision std r. */
+    static double kalmanGain(double odoStd, double visionStd) {
+        double q = odoStd * odoStd, r = visionStd * visionStd;
+        return q / (q + Math.sqrt(q * r));
+    }
+
+    static final double VISION_XY_COEFF =
+            org.firstinspires.ftc.teamcode.subsystems.VisionConstants
+                    .VISION_XY_STD_DEV_COEFFICIENT;
+
     // Mirrors VisionConstants (which can't be loaded here - it imports the SDK).
     static final double[] ODO_STD = {0.5, 0.5, Math.toRadians(2.0)};
     static final double[] VIS_STD = {2.0, 2.0, Math.toRadians(30.0)};
@@ -82,6 +92,35 @@ public class EstimatorTest {
         check("Frame older than the buffer is rejected",
                 near(pd.getEstimatedPosition().getX(), b2, 1e-9),
                 b2 + " -> " + pd.getEstimatedPosition().getX());
+
+        // ---- The std devs the PIPELINE actually produces ----
+        // The checks above feed hand-picked std devs, which cannot catch a
+        // mis-scaled VISION_XY_STD_DEV_COEFFICIENT. This one uses the real
+        // formula, because a coefficient in the wrong units silently reduces
+        // the gain to zero and switches vision fusion off without any
+        // outward sign -- odometry keeps the pose looking plausible.
+        System.out.println("\n=== Vision std devs from the real formula ===");
+        System.out.printf("   VISION_XY_STD_DEV_COEFFICIENT = %s%n",
+                VISION_XY_COEFF);
+        boolean gainsSane = true;
+        for (double[] cfg : new double[][]{{18, 2}, {40, 1}, {60, 2}, {100, 1}}) {
+            double dist = cfg[0];
+            int tags = (int) cfg[1];
+            double xyStd = VISION_XY_COEFF * dist * dist / tags;
+            double g = kalmanGain(ODO_STD[0], xyStd);
+            System.out.printf("   %3.0f in, %d tag(s) -> std %7.2f in, gain %.3f%n",
+                    dist, tags, xyStd, g);
+            if (g < 0.02 || g > 0.95) gainsSane = false;
+        }
+        check("Real-formula gains stay in a usable range", gainsSane,
+                "a frame either does nothing or snaps the pose - check the "
+                        + "coefficient's units (inches, not metres)");
+
+        // Close multi-tag must be trusted more than far single-tag.
+        double closeGain = kalmanGain(ODO_STD[0], VISION_XY_COEFF * 18 * 18 / 2);
+        double farGain = kalmanGain(ODO_STD[0], VISION_XY_COEFF * 100 * 100 / 1);
+        check("Close multi-tag outranks far single-tag", closeGain > farGain * 3,
+                String.format("close %.3f vs far %.3f", closeGain, farGain));
 
         System.out.println("\n=== AllianceFlip / FieldSymmetry ===");
         Pose2d red = new Pose2d(-58, -58, Rotation2d.fromDegrees(45));

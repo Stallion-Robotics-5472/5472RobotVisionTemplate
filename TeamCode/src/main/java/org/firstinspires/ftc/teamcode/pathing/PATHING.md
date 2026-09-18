@@ -46,6 +46,31 @@ while (opModeIsActive() && follower.isBusy()) {
 
 See `opmodes/FollowPathExample` for a complete OpMode.
 
+## Before you drive: check the drivetrain
+
+The follower assumes three conventions hold on your robot:
+
+| command | robot must |
+|---------|-----------|
+| forward power | drive forward |
+| strafe power | slide left |
+| positive turn power | rotate **counter-clockwise** |
+
+If any of these is inverted the follower does not merely track badly — it drives
+itself *away* from the target. Run the **Drivetrain Direction Check** OpMode
+(group `Setup`) first; it drives one motion at a time and tests each wheel
+individually.
+
+The classic failure is setting all four motor `Direction`s the same in
+`PathConstants`. On a mecanum the two sides face opposite ways, so making them
+identical does not reverse the robot — it *swaps translation and rotation*, and
+"drive forward" spins the robot in place. Flip both sides together or neither.
+
+`HEADING_CORRECTION_SIGN` should stay at `+1.0`. It exists only for a drivetrain
+that inverts rotation. If the robot spins away from its target heading and speeds
+up, check the motor directions before touching this constant — a mis-wired
+drivetrain is far more often the cause.
+
 ## Heading modes
 
 - `setTangentHeading()` — face along the path.
@@ -57,10 +82,17 @@ See `opmodes/FollowPathExample` for a complete OpMode.
 
 All gains and tolerances are in `PathConstants`: the translational, drive, and
 heading PIDF gains, the centripetal scale, and the completion/advancement
-tolerances. The defaults are validated in a kinematic simulation but must be
-tuned on the real robot. Increase `TRANSLATIONAL_kP` if the robot tracks loosely;
-raise `CENTRIPETAL_SCALE` if it cuts curves wide; tune `HEADING_kP` for crisp
-turns without oscillation.
+tolerances. **The defaults are starting points and must be tuned on your robot.**
+
+Increase `TRANSLATIONAL_kP` if the robot tracks loosely; raise
+`CENTRIPETAL_SCALE` if it cuts curves wide; tune `HEADING_kP` for crisp turns
+without oscillation.
+
+The closed-loop simulation in `tools/verify/` (`./tools/verify/run.sh`) drives
+the example two-segment path against an ideal robot and reports whether it
+finishes, how long it takes, and its worst heading error. It will not tell you
+the right gains for your hardware, but it does catch a change that makes the
+follower diverge or never terminate.
 
 ### Deceleration feedforward
 

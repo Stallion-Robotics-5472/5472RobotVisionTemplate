@@ -45,6 +45,8 @@ public class AllianceAutoExample extends LinearOpMode {
         Follower follower = new Follower(localization, drivetrain);
 
         Alliance alliance = AUTHORED_FOR;
+        Alliance seededFor = null;
+
         while (opModeInInit()) {
             if (gamepad1.b) {
                 alliance = Alliance.RED;
@@ -52,22 +54,43 @@ public class AllianceAutoExample extends LinearOpMode {
             if (gamepad1.x) {
                 alliance = Alliance.BLUE;
             }
+
+            // Seed the pose as soon as the alliance is known, and re-seed only
+            // when the choice actually changes -- setStartingPose resets the
+            // heading-trust counters, so calling it every loop would stop
+            // vision ever vouching for the seed.
+            if (alliance != seededFor) {
+                localization.setStartingPose(
+                        AllianceFlip.forAlliance(START, AUTHORED_FOR, alliance));
+                seededFor = alliance;
+            }
+
+            // Run the estimator during init so the camera can check the seed
+            // while the robot sits still -- the best look at a tag it will get,
+            // and the last moment a wrong alliance is cheap to fix.
+            localization.update();
+
             telemetry.addLine("Alliance Auto Example");
             telemetry.addData("Alliance", "%s   (B = red, X = blue)", alliance);
             telemetry.addData("Authored for", AUTHORED_FOR);
             telemetry.addData("Flipping", alliance.needsFlipFrom(AUTHORED_FOR) ? "YES" : "no");
             telemetry.addData("Start pose",
                     AllianceFlip.forAlliance(START, AUTHORED_FOR, alliance));
+            telemetry.addLine();
+            telemetry.addData("Start pose check", localization.getStartPoseCheck());
+            if (localization.isStartPoseSuspect()) {
+                telemetry.addLine("Vision says the robot is not facing where the");
+                telemetry.addLine("start pose claims. Check the alliance button");
+                telemetry.addLine("and which way the robot is physically placed.");
+            }
             telemetry.update();
         }
 
         waitForStart();
 
-        // Flip the plan onto whichever side we are actually playing.
-        Pose2d start = AllianceFlip.forAlliance(START, AUTHORED_FOR, alliance);
+        // The pose is already seeded from the init loop (and may have been
+        // corrected by vision while sitting still), so don't re-seed here.
         PathChain plan = AllianceFlip.forAlliance(buildPlan(), AUTHORED_FOR, alliance);
-
-        localization.setStartingPose(start);
         follower.followPath(plan);
 
         while (opModeIsActive() && follower.isBusy()) {
