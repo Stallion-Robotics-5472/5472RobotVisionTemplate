@@ -29,8 +29,8 @@ public class PinpointOdometry {
 
     private void configure() {
         pinpoint.setOffsets(
-                VisionConstants.PINPOINT_X_OFFSET_MM,
-                VisionConstants.PINPOINT_Y_OFFSET_MM,
+                VisionConstants.PINPOINT_X_OFFSET,
+                VisionConstants.PINPOINT_Y_OFFSET,
                 VisionConstants.PINPOINT_OFFSET_UNIT);
         pinpoint.setEncoderResolution(VisionConstants.PINPOINT_POD_TYPE);
         pinpoint.setEncoderDirections(

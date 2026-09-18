@@ -6,7 +6,7 @@
  * segment, finishing facing 90 degrees. The follower pulls its pose from the
  * Localization subsystem every loop.
  *
- * Remove or change @Disabled to make it appear on the Driver Station.
+ * Appears on the Driver Station as "Follow Path Example".
  */
 package org.firstinspires.ftc.teamcode.opmodes;
 

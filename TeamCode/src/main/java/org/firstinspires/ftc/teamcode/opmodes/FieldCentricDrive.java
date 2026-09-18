@@ -97,7 +97,9 @@ public class FieldCentricDrive extends LinearOpMode {
             // +left is to the driver's left.
             double forward = -gamepad1.left_stick_y;
             double left = -gamepad1.left_stick_x;
-            double turn = gamepad1.right_stick_x;
+            // Negated: turn power is CCW-positive, but pushing the stick right
+            // (positive) must turn the robot right, which is CW.
+            double turn = -gamepad1.right_stick_x;
 
             double scale = gamepad1.right_bumper ? SLOW_SCALE : 1.0;
 

@@ -45,8 +45,12 @@ public final class VisionConstants {
      * The sample defaults below are for goBILDA's reference build; measure and
      * replace them for your robot.
      */
-    public static final double PINPOINT_X_OFFSET_MM = -3.125;
-    public static final double PINPOINT_Y_OFFSET_MM = 3.375;
+    public static final double PINPOINT_X_OFFSET = -3.125;
+    public static final double PINPOINT_Y_OFFSET = 3.375;
+    /**
+     * The unit the two offsets above are written in. Change this if you measured
+     * in millimetres -- the numbers and this constant must agree.
+     */
     public static final DistanceUnit PINPOINT_OFFSET_UNIT = DistanceUnit.INCH;
 
     /** Pod type. Use goBILDA_SWINGARM_POD or goBILDA_4_BAR_POD for goBILDA pods. */
@@ -73,8 +77,8 @@ public final class VisionConstants {
     // There are two ways to account for the offset; pick ONE:
     //
     //   (A) RECOMMENDED — Enter the camera pose in the Limelight web UI
-    //       (the camera/robot offset fields). Then getBotpose_MT2() is already
-    //       the robot-center pose, and you should leave
+    //       (the camera/robot offset fields). Then the botpose this code reads
+    //       is already the robot-center pose, and you should leave
     //       APPLY_CAMERA_OFFSET_IN_CODE = false.
     //
     //   (B) Enter ZERO offset in the Limelight UI and set the offset here in
@@ -91,16 +95,33 @@ public final class VisionConstants {
     // also uses the offset inside its own tag solve; (B) assumes botpose carries
     // the true 3D camera pose (best with a level robot / MegaTag1).
     // ---------------------------------------------------------------------
-    public static final boolean APPLY_CAMERA_OFFSET_IN_CODE = true;
+    public static final boolean APPLY_CAMERA_OFFSET_IN_CODE = false;
+
+    // MEASURE THESE ON YOUR OWN ROBOT. They are only read when
+    // APPLY_CAMERA_OFFSET_IN_CODE is true, and they ship as zero on purpose:
+    // a wrong mount model corrupts every vision pose, which is worse than
+    // having no mount model at all.
 
     /** Camera position relative to robot center (inches): +X fwd, +Y left, +Z up. */
-    public static final double CAMERA_FORWARD_OFFSET_IN = -0.98;
-    public static final double CAMERA_LEFT_OFFSET_IN = 6.057;
-    public static final double CAMERA_UP_OFFSET_IN = 4.597;
-    /** Camera orientation relative to robot forward (degrees), CCW/right-hand. */
+    public static final double CAMERA_FORWARD_OFFSET_IN = 0.0;
+    public static final double CAMERA_LEFT_OFFSET_IN = 0.0;
+    public static final double CAMERA_UP_OFFSET_IN = 0.0;
+
+    /**
+     * Camera orientation relative to robot forward (degrees), right-handed
+     * about +X fwd / +Y left / +Z up.
+     *
+     * MIND THE PITCH SIGN. Pitch rotates about +Y (left), so by the right-hand
+     * rule a POSITIVE pitch tilts the camera DOWN and a NEGATIVE pitch tilts it
+     * UP. A camera angled 15 degrees upward to see tags is -15.0, not +15.0.
+     * Getting this backwards doubles the error instead of removing it.
+     *
+     * Yaw is CCW-positive: a camera rotated 15 degrees to the robot's left
+     * is +15.0.
+     */
     public static final double CAMERA_ROLL_OFFSET_DEG = 0.0;
-    public static final double CAMERA_PITCH_OFFSET_DEG = 15;  // + = tilted up
-    public static final double CAMERA_YAW_OFFSET_DEG = -15;
+    public static final double CAMERA_PITCH_OFFSET_DEG = 0.0;   // negative = tilted up
+    public static final double CAMERA_YAW_OFFSET_DEG = 0.0;
 
     /**
      * Full 3D transform from the robot-center frame to the camera frame.

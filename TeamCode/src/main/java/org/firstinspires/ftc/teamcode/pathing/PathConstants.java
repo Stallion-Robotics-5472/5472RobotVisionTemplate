@@ -18,11 +18,25 @@ public final class PathConstants {
     public static final String BACK_LEFT_MOTOR = "bl";
     public static final String BACK_RIGHT_MOTOR = "br";
 
-    // Reverse the side whose wheels spin backwards for positive power.
+    /**
+     * Motor directions.
+     *
+     * On a mecanum drive the left and right motors face opposite ways, so the
+     * two sides MUST be set opposite here. The defaults below (left reversed,
+     * right forward) are the standard arrangement and match the FTC
+     * BasicOmniOpMode sample.
+     *
+     * Setting all four the same way does NOT just reverse the robot: it swaps
+     * translation and rotation, so "drive forward" spins the robot in place.
+     * If forward/back is inverted on your robot, flip BOTH sides together
+     * (left FORWARD, right REVERSE), never one side on its own.
+     *
+     * Verify with the "Drivetrain Direction Check" OpMode before driving.
+     */
     public static final DcMotorSimple.Direction FRONT_LEFT_DIRECTION = DcMotorSimple.Direction.REVERSE;
     public static final DcMotorSimple.Direction BACK_LEFT_DIRECTION = DcMotorSimple.Direction.REVERSE;
-    public static final DcMotorSimple.Direction FRONT_RIGHT_DIRECTION = DcMotorSimple.Direction.REVERSE;
-    public static final DcMotorSimple.Direction BACK_RIGHT_DIRECTION = DcMotorSimple.Direction.REVERSE;
+    public static final DcMotorSimple.Direction FRONT_RIGHT_DIRECTION = DcMotorSimple.Direction.FORWARD;
+    public static final DcMotorSimple.Direction BACK_RIGHT_DIRECTION = DcMotorSimple.Direction.FORWARD;
 
     // ----- Translational controller: pulls the robot onto the path (per inch) -----
     public static final double TRANSLATIONAL_kP = 0.04;
@@ -43,13 +57,19 @@ public final class PathConstants {
     public static final double HEADING_kF = 0.0;
 
     /**
-     * Flips the sign of the heading PID output before it's sent to the
-     * drivetrain as turn power. Depends on which way positive turn power
-     * actually spins the robot (e.g. all motors reversed flips this). If the
-     * robot turns away from the target heading instead of toward it, flip
-     * this between 1.0 and -1.0.
+     * Flips the sign of the heading PID output before it is sent to the
+     * drivetrain as turn power.
+     *
+     * +1.0 is correct for a properly wired mecanum drive: the heading error is
+     * measured CCW-positive and turn power is CCW-positive, so the controller
+     * already drives the error toward zero.
+     *
+     * Only set this to -1.0 if your drivetrain inverts rotation for some
+     * reason. If the robot spins away from its target heading and speeds up,
+     * this constant is wrong -- but check the motor directions above FIRST,
+     * because a mis-wired drivetrain is the far more likely cause.
      */
-    public static final double HEADING_CORRECTION_SIGN = -1.0;
+    public static final double HEADING_CORRECTION_SIGN = 1.0;
 
     /**
      * Centripetal scaling. The centripetal correction magnitude is

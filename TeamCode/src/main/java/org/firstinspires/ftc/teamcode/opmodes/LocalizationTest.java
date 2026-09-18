@@ -6,7 +6,7 @@
  * raw odometry pose and vision diagnostics so you can watch the estimator
  * correct drift as AprilTags come into view.
  *
- * Remove or change @Disabled to make it appear on the Driver Station.
+ * Appears on the Driver Station as "Localization Test (Pinpoint + Limelight)".
  */
 package org.firstinspires.ftc.teamcode.opmodes;
 

@@ -13,7 +13,7 @@
  *   right stick X - turn
  *   right bumper  - hold for slow mode
  *
- * Remove or change @Disabled to make it appear on the Driver Station.
+ * Appears on the Driver Station as "Robot-Centric Mecanum Drive".
  */
 package org.firstinspires.ftc.teamcode.opmodes;
 
@@ -50,10 +50,12 @@ public class RobotCentricDrive extends LinearOpMode {
             // Map gamepad to robot-frame inputs:
             //   forward    = +X (push stick up -> stick_y is negative)
             //   strafeLeft = +Y (push stick left -> stick_x is negative)
-            //   turn       = CCW positive (push right stick left -> turn left)
+            //   turn       = CCW positive, so the right stick is negated:
+            //                pushing it right (positive) must turn the robot
+            //                right, which is CW, which is negative turn power.
             double forward = -gamepad1.left_stick_y;
             double strafeLeft = -gamepad1.left_stick_x;
-            double turn = gamepad1.right_stick_x;
+            double turn = -gamepad1.right_stick_x;
 
             double scale = gamepad1.right_bumper ? SLOW_SCALE : 1.0;
             drivetrain.driveRobotCentric(forward * scale, strafeLeft * scale, turn * scale);

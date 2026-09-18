@@ -37,7 +37,8 @@ public class MecanumDrivetrain implements Drivetrain {
 
     @Override
     public void driveFieldCentric(double fieldXPower, double fieldYPower, double turnPower,
-                                  Rotation2d robotHeading) {        double cos = robotHeading.getCos();
+                                  Rotation2d robotHeading) {
+        double cos = robotHeading.getCos();
         double sin = robotHeading.getSin();
 
         // Rotate the field vector into the robot frame.

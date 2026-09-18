@@ -13,8 +13,10 @@
  *     gyro but heavily biased toward it (large VISION_HEADING_STD_DEV), so the
  *     gyro dominates short-term and vision only slowly corrects heading drift.
  *   - Bad frames (no fix, too few tags, stale, off-field) are rejected.
- *   - Vision measurements are timestamped at capture time (now minus pipeline
- *     latency) so the estimator can latency-compensate them.
+ *   - Vision measurements are timestamped at capture time (now minus the
+ *     Limelight pipeline latency and minus how long the result has been
+ *     waiting on the Robot Controller) so the estimator can
+ *     latency-compensate them.
  *
  * Usage each loop: call {@link #update()}, then read {@link #getPose()}.
  */
@@ -131,13 +133,14 @@ public class Localization implements Localizer {
             return;
         }
 
-        lastTagCount = result.getBotposeTagCount();
-        if (lastTagCount < VisionConstants.MIN_TAG_COUNT) {
+        int tagCount = result.getBotposeTagCount();
+        if (tagCount < VisionConstants.MIN_TAG_COUNT) {
             lastVisionReject = "too few tags";
             return;
         }
 
-        if (result.getStaleness() > VisionConstants.MAX_STALENESS_MS) {
+        long stalenessMs = result.getStaleness();
+        if (stalenessMs > VisionConstants.MAX_STALENESS_MS) {
             lastVisionReject = "stale";
             return;
         }
@@ -196,16 +199,23 @@ public class Localization implements Localizer {
             return;
         }
 
-        // Dynamic std devs (AdvantageKit style): trust scales with distance^2 / tagCount.
+        // Frame accepted: publish its diagnostics.
+        lastTagCount = tagCount;
         lastAvgTagDist = result.getBotposeAvgDist();
-        double stdDevFactor = (lastAvgTagDist * lastAvgTagDist) / lastTagCount;
+
+        // Dynamic std devs (AdvantageKit style): trust scales with distance^2 / tagCount.
+        double stdDevFactor = (lastAvgTagDist * lastAvgTagDist) / tagCount;
         double xyStdDev = VisionConstants.VISION_XY_STD_DEV_COEFFICIENT * stdDevFactor;
         double[] visionStdDevs = {xyStdDev, xyStdDev, VisionConstants.VISION_HEADING_STD_DEV};
 
-        // Latency compensation: timestamp the frame at capture time.
+        // Latency compensation: timestamp the frame at capture time. The frame's
+        // total age is the Limelight's own pipeline latency (capture + targeting)
+        // PLUS however long the finished result has been sitting on the Robot
+        // Controller waiting to be read (staleness). Counting only the pipeline
+        // latency would timestamp the frame later than it really was.
         double latencySeconds =
                 (result.getCaptureLatency() + result.getTargetingLatency()) / 1000.0;
-        double captureTimestamp = now - latencySeconds;
+        double captureTimestamp = now - latencySeconds - (stalenessMs / 1000.0);
 
         poseEstimator.addVisionMeasurement(visionPose, captureTimestamp, visionStdDevs);
         lastVisionAccepted = true;
