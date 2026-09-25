@@ -1,9 +1,11 @@
 # 5472 Robot Vision Template
 
-A complete FTC localization and path-following stack: a **goBILDA Pinpoint**
-odometry computer and a **Limelight 3A** AprilTag camera fused into one field
-pose by a Kalman estimator, driving a Bézier path follower, with a visual path
-planner you can open in a browser.
+A complete FTC localization, path-following and shooting stack: a **goBILDA
+Pinpoint** odometry computer and a **Limelight 3A** AprilTag camera fused into
+one field pose by a Kalman estimator, driving a Bézier path follower, a
+**shoot-on-the-move** aiming solution for a turretless robot, and an
+**FRC-style command framework** to tie it together — plus a visual path planner
+you can open in a browser.
 
 This README explains **how it works**. Two companion documents cover the rest:
 
@@ -14,9 +16,11 @@ This README explains **how it works**. Two companion documents cover the rest:
 | [docs/FTC_SDK_README.md](docs/FTC_SDK_README.md) | The upstream FTC SDK readme and release notes. |
 
 Deeper dives live next to the code they describe:
-[`LOCALIZATION.md`](TeamCode/src/main/java/org/firstinspires/ftc/teamcode/LOCALIZATION.md)
-and
-[`PATHING.md`](TeamCode/src/main/java/org/firstinspires/ftc/teamcode/pathing/PATHING.md).
+
+- [`LOCALIZATION.md`](TeamCode/src/main/java/org/firstinspires/ftc/teamcode/LOCALIZATION.md) — pose fusion
+- [`PATHING.md`](TeamCode/src/main/java/org/firstinspires/ftc/teamcode/pathing/PATHING.md) — path following
+- [`SHOOTING.md`](TeamCode/src/main/java/org/firstinspires/ftc/teamcode/shooting/SHOOTING.md) — shoot on the move
+- [`COMMANDS.md`](TeamCode/src/main/java/org/firstinspires/ftc/teamcode/lib/command/COMMANDS.md) — command framework
 
 ---
 
@@ -26,8 +30,10 @@ and
 - [The coordinate frame](#the-coordinate-frame)
 - [Part 1 — Localization](#part-1--localization)
 - [Part 2 — Path following](#part-2--path-following)
-- [Part 3 — Alliances](#part-3--alliances)
-- [Part 4 — The Path Planner](#part-4--the-path-planner)
+- [Part 3 — Shooting on the move](#part-3--shooting-on-the-move)
+- [Part 4 — The command framework](#part-4--the-command-framework)
+- [Part 5 — Alliances](#part-5--alliances)
+- [Part 6 — The Path Planner](#part-6--the-path-planner)
 - [What runs each loop](#what-runs-each-loop)
 - [File map](#file-map)
 - [Verifying the math](#verifying-the-math)
@@ -90,7 +96,7 @@ This is the same frame the AprilTag field map uses, which is what makes vision
 and odometry directly comparable. It is also **alliance-independent**: a robot
 parked on a given tile reports the same pose whether it is red or blue. That
 property is deliberate and is what makes the alliance handling in
-[Part 3](#part-3--alliances) simple.
+[Part 5](#part-5--alliances) simple.
 
 The robot's own frame, used for motor mixing, is **+X forward, +Y left, turn
 CCW-positive**.
@@ -362,7 +368,77 @@ Direction Check** OpMode before trusting an auto; see the manual's
 
 ---
 
-## Part 3 — Alliances
+## Part 3 — Shooting on the move
+
+A game piece leaving a moving robot **keeps the robot's velocity**, so aiming
+straight at the goal while driving misses by roughly `speed × flight time` — about
+**48 inches** at the velocities the test suite sweeps. The fix is to aim at a
+*virtual goal*, offset from the real one by exactly what the robot's motion will
+add:
+
+```
+    virtualGoal = goal − shooterVelocity × timeOfFlight
+```
+
+That is circular (flight time comes from distance, distance from the virtual
+goal), so it is iterated to a fixed point.
+
+This was ported from team 5472's FRC turret code and adapted for a robot with **no
+turret**, which changes three things:
+
+- The output is a **field-relative robot heading**, not a turret angle clamped to
+  a mechanical sweep. The robot is the turret.
+- The driver keeps **translation** while the aiming solution owns **heading**, so
+  the robot never has to stop.
+- The solution includes an **angular feedforward**. While translating past the
+  goal the aim direction keeps sweeping, and a position-only heading controller
+  permanently trails it. A turret is quick enough to mostly get away without
+  this; a whole robot is not.
+
+The **shot table** (`ShooterMap`) maps distance → flywheel rpm, hood angle and
+flight time, interpolating between rows you measured and clamping outside them.
+Flight time is the column teams skip and the one this depends on — leave it at
+zero and the correction silently does nothing.
+
+Firing is gated on range, aim, flywheel speed **and pose trust**. That last one
+reuses the heading-trust check from Part 1: a pose seeded 180° out looks perfectly
+healthy from the inside, and without the gate a mis-seeded robot confidently
+shoots at empty field.
+
+Full detail, setup order and the tuning workflow:
+[`SHOOTING.md`](TeamCode/src/main/java/org/firstinspires/ftc/teamcode/shooting/SHOOTING.md).
+
+---
+
+## Part 4 — The command framework
+
+`lib/command` is a WPILib-shaped command system: **subsystems** that only one
+command may use at a time, **commands** with a lifecycle that compose into
+sequences and parallels, and a **scheduler** that runs it all. If you have written
+FRC code it reads exactly as you expect.
+
+```java
+whileHeld(() -> gamepad1.a, Commands.sequence(
+        Commands.runOnce(() -> shooter.setFlywheelRpm(2500), shooter),
+        Commands.waitUntil(shooter::atSpeed),
+        Commands.run(shooter::runFeeder, shooter).withTimeout(1.5)));
+```
+
+Nothing external is needed — no FTCLib, no SolversLib, no extra Gradle
+dependency — which also means it is covered by the offline suite.
+
+**One deliberate difference from WPILib:** the scheduler is an ordinary object
+owned by the OpMode, not a static singleton. An FTC app runs many OpModes in one
+process, and a static scheduler carries commands, bindings and stale hardware
+handles between runs — the failure where an OpMode works the first time after a
+Robot Controller restart and misbehaves every time after.
+
+Full detail:
+[`COMMANDS.md`](TeamCode/src/main/java/org/firstinspires/ftc/teamcode/lib/command/COMMANDS.md).
+
+---
+
+## Part 5 — Alliances
 
 The field frame is absolute, so the alliance changes exactly two things and
 neither of them touches the pose estimate.
@@ -395,7 +471,7 @@ into a right-curving one.
 
 ---
 
-## Part 4 — The Path Planner
+## Part 6 — The Path Planner
 
 `TeamCode/src/main/assets/pathplanner.html` is a self-contained visual editor —
 no build step, no server, no dependencies. Drag control points over a picture of
@@ -458,6 +534,27 @@ applies the same 180° rotation `AllianceFlip` does at run time.
  └───────────────────────────────────────────────────────────┘
 ```
 
+While aiming, the middle stage is replaced by the shooting path:
+
+```
+ ┌── AimLogic.calculate() ───────────────────────────────────┐
+ │  look ahead by the phase delay                            │
+ │  find the shooter's own position and velocity (+ omega x r)│
+ │  iterate: virtualGoal = goal − shooterVel × timeOfFlight   │
+ │  ──► heading target, angular feedforward, distance         │
+ └───────────────────────────────────────────────────────────┘
+                               │
+                    ┌──────────┴──────────┐
+                    ▼                     ▼
+   driveWithHeadingLock(          setShotForDistance(
+       driver translation,            effective distance)
+       heading target,            └─► flywheel rpm + hood angle
+       feedforward)
+                    │
+                    ▼
+   feed only if: in range, aimed, at speed, pose trusted
+```
+
 ---
 
 ## File map
@@ -489,11 +586,36 @@ All paths relative to `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/`.
 | `pathing/Drivetrain.java`, `Localizer.java` | The two interfaces the follower depends on. |
 | `pathing/PathPlannerServer.java` | Serves the planner from the robot. |
 
+### Shooting
+
+| File | Role |
+|---|---|
+| `shooting/ShootingConstants.java` | **Every shooting knob.** Goal position, shooter geometry, the shot table, hardware. Fill it in top to bottom. |
+| `shooting/AimLogic.java` | The shoot-on-the-move maths. Pure static, no hardware. |
+| `shooting/AimSolution.java` | Its output: heading, feedforward, distance, readiness. |
+| `shooting/ShooterMap.java`, `ShooterSetpoint.java` | The shot table and one row of it. |
+| `subsystems/ShooterSubsystem.java` | Flywheel, hood, feeder, driven from the table. |
+| `subsystems/DriveSubsystem.java` | The drivetrain as a subsystem, with heading-lock drive. |
+| `commands/AimAndShootCommand.java` | Ties it together and gates the feeder. |
+
+### Command framework
+
+| File | Role |
+|---|---|
+| `lib/command/CommandOpMode.java` | Base OpMode. Subclass it and override `configure()`. |
+| `lib/command/CommandScheduler.java` | The loop and subsystem arbitration. |
+| `lib/command/Command.java`, `Commands.java` | Lifecycle, decorators, static factories. |
+| `lib/command/Trigger.java` | Condition → command bindings. |
+| `lib/command/*CommandGroup.java` | Sequential, parallel, race, deadline. |
+| `lib/util/InterpolatingDoubleTreeMap.java` | Linear lookup table, clamped at the ends. |
+
 ### OpModes
 
 | OpMode | Group | Purpose |
 |---|---|---|
 | **Drivetrain Direction Check** | `Setup` | **Run first.** Confirms forward / strafe / turn conventions and each wheel. |
+| **Shooter Map Tuning** | `Setup` | Build the shot table: auto-aims so the distance is honest, bypasses the map, logs pasteable rows. |
+| **Shoot On The Move** | `Drive` | Command-based TeleOp. Drive and shoot without stopping. |
 | Localization Test | `Vision` | Streams fused vs. raw odometry vs. raw vision. The tuning and diagnosis tool. |
 | Robot-Centric Mecanum Drive | `Drive` | Plain TeleOp; drives relative to the robot's own front. |
 | Field-Centric Mecanum Drive | `Drive` | TeleOp relative to the driver's point of view, with alliance select. |
@@ -524,6 +646,15 @@ surfaces without opening Android Studio. Then it runs numeric checks covering:
   against synthetic Limelight frames: earning and revoking trust, the
   MegaTag1 → MegaTag2 switchover, catching a 180° seed, re-seeding from vision,
   and outlier rejection with its escape hatch;
+- the **shoot-on-the-move aiming**, by simulating the game piece: it launches
+  from the shooter at the speed the shot table implies, adds the robot's velocity,
+  flies for the table's flight time, and checks where it lands. Across 151 swept
+  cases the worst miss is 0.0018 in, against 47.99 in for naive aiming;
+- the **command framework's** semantics — subsystem exclusivity, interruption,
+  default commands, group behaviour, decorators, trigger edges, and that
+  scheduling from inside a running command does not corrupt the loop;
+- the **shot table's** interpolation and clamping, plus internal consistency of
+  the shipped constants;
 - alliance flipping, including that it is an exact involution and that flipped
   tangent headings still match the flipped geometry;
 - a **closed-loop follower simulation** that drives the example path to

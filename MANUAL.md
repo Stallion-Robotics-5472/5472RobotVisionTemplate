@@ -25,11 +25,13 @@ Work through Part A once. After that, Part B (tuning) and Part C
 9. [Draw a path](#9-draw-a-path)
 10. [Write an autonomous](#10-write-an-autonomous)
 11. [One auto, both alliances](#11-one-auto-both-alliances)
-12. [Competition day checklist](#12-competition-day-checklist)
+12. [Set up shooting](#12-set-up-shooting)
+13. [Write command-based code](#13-write-command-based-code)
+14. [Competition day checklist](#14-competition-day-checklist)
 
 **Part C — When it goes wrong**
-13. [Troubleshooting](#13-troubleshooting)
-14. [Reading the telemetry](#14-reading-the-telemetry)
+15. [Troubleshooting](#15-troubleshooting)
+16. [Reading the telemetry](#16-reading-the-telemetry)
 
 ---
 
@@ -190,7 +192,7 @@ should read about 24. If it reads 10 or 60, the pod type or offsets are wrong.
 
 **b. Vision sees tags.** Point the camera at an AprilTag. `Vision` should read
 `accepted true`. If not, the reject reason tells you why — see
-[§14](#14-reading-the-telemetry).
+[§16](#16-reading-the-telemetry).
 
 **c. Vision agrees with reality.** Put the robot at a known spot on the field
 and compare `Raw Vision 2D` against where it actually is. They should agree
@@ -405,7 +407,146 @@ which is what the init-time check exists to catch.
 
 ---
 
-## 12. Competition day checklist
+## 12. Set up shooting
+
+Shoot-on-the-move aims at a *virtual goal* offset by whatever the robot's motion
+will add to the shot, so the robot never has to stop. Read
+[`SHOOTING.md`](TeamCode/src/main/java/org/firstinspires/ftc/teamcode/shooting/SHOOTING.md)
+for how it works; this is the order to set it up in. Everything is in
+`ShootingConstants.java`.
+
+### a. The goal position — nothing works until this is right
+
+```java
+public static final Translation2d GOAL_POSITION = new Translation2d(0.0, 60.0);
+```
+
+**The shipped value is a placeholder.** Get the real one from the season's field
+drawings (converted into this template's frame — origin at field centre, +X right,
++Y away from the audience), or measure it:
+
+1. Run **Shooter Map Tuning** (group `Setup`).
+2. Park at a known spot and compare the `DISTANCE` readout to a tape measure.
+3. Adjust `GOAL_POSITION` until they agree.
+
+Aim at the point the piece must pass through — the middle of the *opening*, not
+the middle of the structure. Then set `GOAL_RADIUS_IN` to a bit less than the true
+half-width; two thirds is a fair start, since the piece has size, the pose has
+error and the shot has spread.
+
+### b. Where the shooter sits
+
+Measure `SHOOTER_FORWARD_OFFSET_IN` and `SHOOTER_LEFT_OFFSET_IN` from the robot's
+**centre of rotation**, and set `SHOOTER_YAW_OFFSET_DEG` (0 = fires forward, 180 =
+out the back).
+
+These matter more than they look. An off-centre shooter is swung sideways when the
+robot rotates and the piece inherits that motion, which is the classic cause of a
+robot that shoots well standing still and misses while turning.
+
+### c. Tune the flywheel
+
+Set `FLYWHEEL_TICKS_PER_REV` (28 for a bare goBILDA 5202/5203 or REV HD Hex;
+multiply by the gearbox if geared) and `FLYWHEEL_GEAR_RATIO`.
+
+Then the velocity PIDF. **Tune `FLYWHEEL_F` first** — it does most of the work and
+should be roughly `32767 / maxTicksPerSecond`. Add `FLYWHEEL_P` until recovery
+after a shot is quick without oscillating. Leave I and D at zero unless you have a
+reason.
+
+Check it: command a speed and watch the `Flywheel` telemetry reach it and hold.
+`FLYWHEEL_TOLERANCE_RPM` is the "at speed" window that gates firing — tight enough
+that a shot is repeatable, loose enough that it is reachable.
+
+### d. Build the shot table
+
+Run **Shooter Map Tuning**. The robot auto-aims the whole time so the distance
+readout stays honest, but the map is bypassed and rpm/hood come from what you dial
+in.
+
+1. Confirm `DISTANCE` against a tape measure. If it disagrees, stop and fix
+   `GOAL_POSITION` — nothing downstream will work.
+2. Park at a distance. Hold **LB** to aim and let it settle.
+3. `dpad up/down` for rpm, `dpad left/right` for hood. **RT** to fire.
+4. Once shots go in, press **A** to log the row.
+5. Move and repeat. Five or six rows across your usable range is plenty.
+6. Paste the rows into `SHOT_MAP`.
+
+### e. Fill in the flight times
+
+This is the step teams skip, and it is the one shoot-on-the-move depends on.
+
+**With flight time left at zero, the moving correction computes a zero offset and
+does nothing at all** — the robot shoots well standing still and misses while
+moving, with no error anywhere.
+
+You cannot read it off the robot. Film a shot in slow motion on a phone and time
+from the piece leaving the shooter to reaching the goal. Even a rough value is far
+better than zero.
+
+### f. Check the range matches the table
+
+`MIN_SHOT_DISTANCE_IN` / `MAX_SHOT_DISTANCE_IN` must sit **inside** `SHOT_MAP`'s
+measured range. A shot is in range only when both allow it, so widening these past
+the table does not extend the robot's reach. `./tools/verify/run.sh` asserts this.
+
+### g. Shoot while moving
+
+Run **Shoot On The Move** (group `Drive`). Hold **LB** to aim; the robot keeps
+driving wherever you put it while rotating to lead the goal. Pull **RT** to fire.
+
+If it will not fire, the telemetry `Shot` line names the blocker — range, aim,
+flywheel speed, or pose trust.
+
+---
+
+## 13. Write command-based code
+
+`lib/command` is a WPILib-shaped command system. Full detail in
+[`COMMANDS.md`](TeamCode/src/main/java/org/firstinspires/ftc/teamcode/lib/command/COMMANDS.md);
+the shape is:
+
+```java
+@TeleOp(name = "My Robot")
+public class MyOpMode extends CommandOpMode {
+    @Override
+    public void configure() {
+        DriveSubsystem drive = new DriveSubsystem(hardwareMap);
+        ShooterSubsystem shooter = new ShooterSubsystem(hardwareMap);
+        register(drive, shooter);
+
+        // What each subsystem does when nothing else asks for it.
+        setDefaultCommand(drive, new RunCommand(
+                () -> drive.driveDriverRelative(
+                        -gamepad1.left_stick_y, -gamepad1.left_stick_x,
+                        -gamepad1.right_stick_x, alliance),
+                drive));
+        setDefaultCommand(shooter, new RunCommand(shooter::idle, shooter));
+
+        // Hold a button to run something else; release restores the defaults.
+        whileHeld(() -> gamepad1.a, Commands.sequence(
+                Commands.runOnce(() -> shooter.setFlywheelRpm(2500), shooter),
+                Commands.waitUntil(shooter::atSpeed),
+                Commands.run(shooter::runFeeder, shooter).withTimeout(1.5)));
+    }
+}
+```
+
+Three rules worth knowing up front:
+
+- **One command per subsystem.** Scheduling a command whose subsystem is taken
+  cancels the holder. This is the feature — it is what stops two bits of code
+  fighting over a motor.
+- **Always stop your mechanism in `end(boolean interrupted)`.** A cancelled
+  command that skips this leaves a motor running.
+- **Don't reuse a command instance** in two groups. Build a second one; the
+  framework rejects it rather than misbehaving.
+
+`ShootOnTheMoveTeleOp` is the worked reference.
+
+---
+
+## 14. Competition day checklist
 
 Before the first match:
 
@@ -415,6 +556,9 @@ Before the first match:
 - [ ] `Vision source` reaches `MegaTag2 | heading TRUSTED` with a tag in view.
 - [ ] Start poses in your autos match where the robot is actually placed.
 - [ ] Limelight field map is **this season's**.
+- [ ] `GOAL_POSITION` verified against a tape measure.
+- [ ] `SHOT_MAP` built from real shots, with **non-zero flight times**.
+- [ ] Shoot On The Move fires while driving, not just standing still.
 
 Before every match:
 
@@ -427,7 +571,7 @@ Before every match:
 
 # Part C — When it goes wrong
 
-## 13. Troubleshooting
+## 15. Troubleshooting
 
 ### The robot spins in place when told to drive forward
 
@@ -455,7 +599,7 @@ across gives std devs in the hundreds of inches and silently disables fusion.
 
 ### Vision never gets accepted
 
-Read the reject reason ([§14](#14-reading-the-telemetry)). Most common: no field
+Read the reject reason ([§16](#16-reading-the-telemetry)). Most common: no field
 map uploaded, wrong pipeline index, or the tag is too far away.
 
 ### The pose is off by a constant few inches
@@ -481,6 +625,46 @@ MegaTag1 keeps disagreeing with the seeded heading. Either the seed is wrong
 (most likely), or the camera mount yaw offset is wrong, or the field map does
 not match the field you are on.
 
+### Shoots well standing still, misses while moving
+
+The flight times in `SHOT_MAP` are zero (or far too small). With zero flight time
+the moving-shot correction computes a zero offset and does nothing. Time them from
+slow-motion video — see [§12e](#12-set-up-shooting).
+
+### Shoots well standing still, misses while turning
+
+`SHOOTER_FORWARD_OFFSET_IN` / `SHOOTER_LEFT_OFFSET_IN` are wrong. An off-centre
+shooter is swung sideways by rotation and the piece inherits that motion.
+
+### The robot points 180° away from the goal when aiming
+
+`SHOOTER_YAW_OFFSET_DEG`. It is 180 for a shooter firing out the back, 0 for one
+firing forward.
+
+### Aiming always trails a moving target
+
+Raise `PHASE_DELAY_SECONDS`, then check `TURN_POWER_PER_RAD_PER_SEC` in
+`DriveSubsystem` — it converts the angular feedforward into turn power and should
+be 1 / (your robot's turn rate at full power, rad/s).
+
+### It aims but never fires
+
+Read the `Shot` telemetry line; `AimAndShootCommand.getStatus()` names exactly
+which gate is open: out of range, still turning, still spinning up, or pose not
+trusted. "Pose not trusted" means vision has not vouched for the heading yet —
+point the camera at a tag, and see [§6e](#6-verify-localization).
+
+### A command keeps a motor running after I let go of the button
+
+That command is not stopping its mechanism in `end(boolean interrupted)`.
+`whileHeld` cancels on release, which calls `end(true)`.
+
+### An OpMode works once after a restart, then misbehaves
+
+This is the failure a static scheduler causes, and it is why the scheduler here is
+per-OpMode. If you see it, check you are not holding subsystems or commands in
+`static` fields of your own.
+
 ### The Path Planner will not load from the robot
 
 It depends on SDK web-server internals. Confirm the app is deployed and you are
@@ -489,7 +673,7 @@ it has no server dependency at all.
 
 ---
 
-## 14. Reading the telemetry
+## 16. Reading the telemetry
 
 Every OpMode calls `localization.addTelemetry(telemetry)`, which prints:
 

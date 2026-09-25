@@ -24,6 +24,8 @@ Heading `0` faces +X. `90°` faces +Y.
 | OpMode | Group | Use it to |
 |---|---|---|
 | **Drivetrain Direction Check** | `Setup` | **Run first.** Verify forward / strafe / turn and each wheel |
+| **Shooter Map Tuning** | `Setup` | Build the shot table; auto-aims, bypasses the map, logs rows |
+| **Shoot On The Move** | `Drive` | Command-based TeleOp; drive and shoot without stopping |
 | Localization Test | `Vision` | Watch fused vs. odometry vs. vision; diagnose everything |
 | Robot-Centric Mecanum Drive | `Drive` | Drive relative to the robot's own front |
 | Field-Centric Mecanum Drive | `Drive` | Drive relative to the driver, with alliance select |
@@ -141,6 +143,114 @@ Translation2d p = AllianceFlip.forAlliance(point, AUTHORED_FOR, running);
 Returns the original untouched when the alliances match. Default symmetry is
 `ROTATIONAL` (180° about field centre) — correct for BIOBUZZ.
 
+**Shoot On The Move** (command-based TeleOp)
+
+| Control | Action |
+|---|---|
+| left stick | translate (driver's point of view) |
+| **left bumper** | hold to **aim** at the goal (shoot on the move) |
+| **right trigger** | fire, once the shot is ready |
+| right stick X | turn (only when not aiming) |
+| right bumper | slow mode |
+| `Y` | re-seed pose from vision |
+| `back` | re-zero driver-forward |
+| dpad up/down | rpm trim ±50 |
+| dpad left/right | hood trim ∓0.5° |
+| `X` | clear trim |
+
+**Shooter Map Tuning**
+
+| Control | Action |
+|---|---|
+| **left bumper** | hold to aim (keeps the distance readout honest) |
+| **right trigger** | fire |
+| dpad up/down | rpm ±25 |
+| dpad left/right | hood ∓0.5° |
+| `A` | log the current row |
+| `B` | clear the log |
+
+---
+
+## Shooting API
+
+```java
+// aiming
+AimSolution s = AimLogic.calculate(
+        pose, fieldVelocity, omegaRadPerSec, goal, shooterMap, AIM_CONFIG);
+s.targetHeadingRadians           // where to point the ROBOT
+s.headingFeedforwardRadPerSec    // sweep rate; add to the heading controller
+s.effectiveDistanceInches        // look the shot up with THIS, not the actual distance
+s.canShootFrom(currentHeading)   // in range AND pointed correctly
+
+// the goal is alliance-dependent
+Translation2d goal = AllianceFlip.forAlliance(
+        ShootingConstants.GOAL_POSITION, ShootingConstants.AUTHORED_FOR, alliance);
+
+// shot table
+ShooterMap map = ShooterMap.builder()
+        //     distance(in)   rpm   hood(deg)  flight(s)
+        .add(           36,  2350,     27.0,      0.40)
+        .build();
+map.setpointAt(d) / rpmAt(d) / hoodAt(d) / timeOfFlightAt(d) / covers(d)
+
+// shooter
+shooter.setShotForDistance(s.effectiveDistanceInches);
+shooter.atSpeed() / idle() / stow() / runFeeder() / stopFeeder()
+shooter.addRpmTrim(50) / addHoodTrim(0.5) / clearTrim()
+
+// drive
+drive.driveWithHeadingLock(fieldX, fieldY, targetHeading, feedforward);
+drive.driveDriverRelative(fwd, left, turn, alliance);
+drive.getFieldVelocity() / getAngularVelocity()
+```
+
+---
+
+## Command system
+
+```java
+public class MyOpMode extends CommandOpMode {
+    @Override public void configure() {
+        register(drive, shooter);
+        setDefaultCommand(drive, new RunCommand(() -> drive.drive(...), drive));
+        whileHeld(() -> gamepad1.a, myCommand);
+        whenPressed(() -> gamepad1.b, Commands.runOnce(shooter::stow, shooter));
+    }
+}
+```
+
+| Factory | Does |
+|---|---|
+| `Commands.runOnce(r, subs)` | once, then ends |
+| `Commands.run(r, subs)` | every loop, never ends |
+| `Commands.startEnd(a, b, subs)` | hold-to-run |
+| `Commands.waitSeconds(t)` / `waitUntil(cond)` | timing / gating |
+| `Commands.sequence(...)` | one after another |
+| `Commands.parallel(...)` | together, ends when all end |
+| `Commands.race(...)` | together, ends when the first ends |
+| `Commands.deadline(d, ...)` | others run while `d` does |
+
+| Decorator | Does |
+|---|---|
+| `.withTimeout(s)` | give up after `s` |
+| `.until(cond)` / `.onlyWhile(cond)` | end early |
+| `.andThen(c)` / `.alongWith(c)` / `.raceWith(c)` | compose |
+| `.repeatedly()` | restart forever |
+| `.finallyDo(r)` | cleanup however it ends |
+| `.onlyIf(cond)` / `.unless(cond)` | conditional schedule |
+| `.withInterruptBehavior(b)` | `CANCEL_SELF` (default) or `CANCEL_INCOMING` |
+
+| Binding | Fires |
+|---|---|
+| `whenPressed` | rising edge |
+| `whileHeld` | while true, cancels on release |
+| `toggleWhenPressed` | press on, press off |
+
+Rules: one command per subsystem at a time; a new command cancels the holder;
+default commands fill idle subsystems; groups claim all their children's
+subsystems; parallel children may not share one; a command instance belongs to
+one group. The scheduler is per-OpMode, **not** a static singleton.
+
 ---
 
 ## Constants
@@ -162,6 +272,29 @@ Returns the original untouched when the alliances match. Default symmetry is
 | `END_HEADING_TOLERANCE` | `2°` | finished-heading window |
 | `END_VELOCITY_TOLERANCE` | `2.0` in/s | must be settled |
 | `ADVANCE_LENGTH_TOLERANCE` | `2.0` in | when to start the next segment |
+
+### `ShootingConstants` — shooting
+
+| Constant | Default | Meaning |
+|---|---|---|
+| `GOAL_POSITION` | `(0, 60)` | **PLACEHOLDER — set this.** Goal field position, inches |
+| `AUTHORED_FOR` | `RED` | Alliance the goal position is written for |
+| `GOAL_RADIUS_IN` | `6.0` | Effective half-width; sets the heading tolerance |
+| `SHOOTER_FORWARD/LEFT_OFFSET_IN` | `0.0` | Shooter position from the turn centre |
+| `SHOOTER_YAW_OFFSET_DEG` | `0.0` | 0 = fires forward, 180 = out the back |
+| `PHASE_DELAY_SECONDS` | `0.02` | Control-latency lookahead |
+| `MAX_AIM_ITERATIONS` | `10` | Cap on virtual-goal passes |
+| `AIM_CONVERGENCE_TOLERANCE_IN` | `0.01` | Stop iterating below this |
+| `MAX_HEADING_TOLERANCE_DEG` | `20.0` | Ceiling on the scaled tolerance |
+| `MIN/MAX_SHOT_DISTANCE_IN` | `18 / 96` | Must sit **inside** `SHOT_MAP`'s range |
+| `SHOT_MAP` | 5 rows | **PLACEHOLDER — measure this.** distance → rpm, hood, flight time |
+| `FLYWHEEL_TICKS_PER_REV` | `28.0` | Motor encoder ticks (bare goBILDA/REV = 28) |
+| `FLYWHEEL_GEAR_RATIO` | `1.0` | Flywheel revs per motor rev |
+| `FLYWHEEL_P/I/D/F` | `12/0/0/14` | Velocity PIDF; tune **F** first (≈32767/maxTicksPerSec) |
+| `FLYWHEEL_TOLERANCE_RPM` | `75.0` | "At speed" window |
+| `FLYWHEEL_IDLE_RPM` | `1200.0` | Held while waiting |
+| `HOOD_DEG_AT_SERVO_0/1` | `15 / 45` | Maps hood angle onto servo travel |
+| `FEED_TIME_SECONDS` | `0.35` | One shot's feed duration |
 
 ### `VisionConstants` — localization
 
@@ -245,6 +378,21 @@ Telemetry shows `Vision source: MegaTag2 | heading TRUSTED`.
 | `off field` | solved outside the field + margin |
 | `jump NN in` | too far from a settled estimate |
 | `vision disabled` | `VISION_ENABLED = false` |
+
+---
+
+## Shoot-on-the-move gotchas
+
+| Symptom | Cause |
+|---|---|
+| Good standing, misses while **moving** | flight time left at 0 in `SHOT_MAP` — the correction computes a zero offset and does nothing |
+| Good standing, misses while **turning** | `SHOOTER_FORWARD/LEFT_OFFSET_IN` wrong (the ω × r term) |
+| Points 180° wrong | `SHOOTER_YAW_OFFSET_DEG` |
+| Always trails a moving aim | raise `PHASE_DELAY_SECONDS`; check `TURN_POWER_PER_RAD_PER_SEC` in `DriveSubsystem` |
+| Never fires | read `AimAndShootCommand.getStatus()` — it names the blocker |
+| Distance disagrees with tape | `GOAL_POSITION`, or the seeded start pose |
+
+Distances are **inches**. The FRC original was metres.
 
 ---
 
