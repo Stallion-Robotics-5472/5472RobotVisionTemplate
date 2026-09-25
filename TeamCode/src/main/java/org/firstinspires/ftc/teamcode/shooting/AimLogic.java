@@ -255,6 +255,16 @@ public final class AimLogic {
         public final double minShotDistanceInches;
         public final double maxShotDistanceInches;
 
+        /**
+         * A copy of this config with a different goal radius, for aiming at a goal
+         * whose opening differs from the default. Everything else is unchanged.
+         */
+        public Config withGoalRadius(double goalRadiusInches) {
+            return new Config(robotToShooter, shooterYawOffsetRadians, phaseDelaySeconds,
+                    maxIterations, convergenceToleranceInches, goalRadiusInches,
+                    maxHeadingToleranceRadians, minShotDistanceInches, maxShotDistanceInches);
+        }
+
         public Config(Translation2d robotToShooter, double shooterYawOffsetRadians,
                       double phaseDelaySeconds, int maxIterations,
                       double convergenceToleranceInches, double goalRadiusInches,

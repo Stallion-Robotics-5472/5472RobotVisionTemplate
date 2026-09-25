@@ -415,24 +415,46 @@ will add to the shot, so the robot never has to stop. Read
 for how it works; this is the order to set it up in. Everything is in
 `ShootingConstants.java`.
 
-### a. The goal position — nothing works until this is right
+### a. The goals — nothing works until these are right
+
+BIOBUZZ scores on hives and flowers, so list every goal you shoot at in
+`ShootingConstants.GOALS`:
 
 ```java
-public static final Translation2d GOAL_POSITION = new Translation2d(0.0, 60.0);
+Goal.named("primary", 0.0, 60.0)
+        .tags(/* AprilTag IDs from the field drawings */)
+        .radius(6.0)
+        .worth(1)
+        .build(),
 ```
 
-**The shipped value is a placeholder.** Get the real one from the season's field
-drawings (converted into this template's frame — origin at field centre, +X right,
-+Y away from the audience), or measure it:
+**The shipped entry is a placeholder and will aim at empty field.** Read the real
+values off the season's Competition Manual and field drawings, converting positions
+into this template's frame (origin at field centre, +X right, +Y away from the
+audience, inches). Aim at the point the piece must pass *through* — the middle of the
+opening, not of the structure.
+
+Give a goal **its own `.map(...)`** whenever its height differs — one flywheel and
+hood curve cannot serve two heights. Give it **tag IDs** so the robot can tell which
+goal it is looking at.
+
+To check a position:
 
 1. Run **Shooter Map Tuning** (group `Setup`).
 2. Park at a known spot and compare the `DISTANCE` readout to a tape measure.
-3. Adjust `GOAL_POSITION` until they agree.
+3. Adjust the position until they agree.
 
-Aim at the point the piece must pass through — the middle of the *opening*, not
-the middle of the structure. Then set `GOAL_RADIUS_IN` to a bit less than the true
-half-width; two thirds is a fair start, since the piece has size, the pose has
-error and the shot has spread.
+`radius` is a bit less than the true half-width — two thirds is a fair start, since
+the piece has size, the pose has error and the shot has spread.
+
+Then choose how the robot picks between them. `GOAL_STRATEGY` defaults to
+`TAG_VISIBLE` (prefer goals whose tags the camera can see, falling back to nearest).
+**Check `GOAL_TAG_MEANING` against the manual:** if a tag gets *covered* as its goal
+fills, the hidden tag marks the open one and you want `HIDDEN_MEANS_AVAILABLE`.
+
+Leave `GOAL_SWITCH_FRAMES` non-zero. On a turretless robot the goal sets the whole
+chassis heading, and tag visibility flickers while driving — switching instantly
+makes the robot swing between two headings and never settle.
 
 ### b. Where the shooter sits
 
@@ -465,7 +487,7 @@ readout stays honest, but the map is bypassed and rpm/hood come from what you di
 in.
 
 1. Confirm `DISTANCE` against a tape measure. If it disagrees, stop and fix
-   `GOAL_POSITION` — nothing downstream will work.
+   the goal's position — nothing downstream will work.
 2. Park at a distance. Hold **LB** to aim and let it settle.
 3. `dpad up/down` for rpm, `dpad left/right` for hood. **RT** to fire.
 4. Once shots go in, press **A** to log the row.
@@ -556,7 +578,8 @@ Before the first match:
 - [ ] `Vision source` reaches `MegaTag2 | heading TRUSTED` with a tag in view.
 - [ ] Start poses in your autos match where the robot is actually placed.
 - [ ] Limelight field map is **this season's**.
-- [ ] `GOAL_POSITION` verified against a tape measure.
+- [ ] Every goal's position verified against a tape measure.
+- [ ] `GOAL_TAG_MEANING` matches how the manual uses tags.
 - [ ] `SHOT_MAP` built from real shots, with **non-zero flight times**.
 - [ ] Shoot On The Move fires while driving, not just standing still.
 

@@ -10,7 +10,7 @@
  * Ported from the MAP_TUNING state in team 5472's FRC superstructure.
  *
  * HOW TO USE IT
- *   1. Set ShootingConstants.GOAL_POSITION first. Check it by comparing the
+ *   1. Set ShootingConstants.GOALS first. Check each goal by comparing the
  *      DISTANCE readout against a tape measure -- if they disagree, the goal
  *      position (or the start pose) is wrong and nothing else will work.
  *   2. Park at a distance. Hold LB so the robot aims, and let it settle.
@@ -32,6 +32,7 @@
  *   dpad left/right   hood angle    -/+ 0.5 deg
  *   A                 log the current row
  *   B                 clear the log
+ *   right bumper      cycle which goal you are tuning against
  *   X / Y (in init)   select RED / BLUE alliance
  */
 package org.firstinspires.ftc.teamcode.opmodes;
@@ -45,9 +46,9 @@ import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Translation2d;
 import org.firstinspires.ftc.teamcode.pathing.Alliance;
-import org.firstinspires.ftc.teamcode.pathing.AllianceFlip;
 import org.firstinspires.ftc.teamcode.shooting.AimLogic;
 import org.firstinspires.ftc.teamcode.shooting.AimSolution;
+import org.firstinspires.ftc.teamcode.shooting.GoalSelector;
 import org.firstinspires.ftc.teamcode.shooting.ShootingConstants;
 import org.firstinspires.ftc.teamcode.subsystems.DriveSubsystem;
 import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem;
@@ -64,6 +65,7 @@ public class ShooterMapTuning extends CommandOpMode {
     private ShooterSubsystem shooter;
 
     private Alliance alliance = Alliance.RED;
+    private final GoalSelector goalSelector = ShootingConstants.newGoalSelector();
     private double manualRpm = 2000.0;
     private double manualHoodDeg = ShootingConstants.HOOD_STOWED_DEG;
     private AimSolution solution;
@@ -120,16 +122,31 @@ public class ShooterMapTuning extends CommandOpMode {
         whenPressed(() -> gamepad1.dpad_left, Commands.runOnce(() -> manualHoodDeg -= 0.5));
 
         whenPressed(() -> gamepad1.a && !opModeInInit(), Commands.runOnce(this::logRow));
+        // Each goal needs its own table, so tune them one at a time.
+        whenPressed(() -> gamepad1.right_bumper, Commands.runOnce(goalSelector::cycle));
         whenPressed(() -> gamepad1.b && !opModeInInit(),
                 Commands.runOnce(loggedRows::clear));
     }
 
     private AimSolution computeSolution() {
-        Translation2d goal = AllianceFlip.forAlliance(
-                ShootingConstants.GOAL_POSITION, ShootingConstants.AUTHORED_FOR, alliance);
+        goalSelector.update(drive.getPose(),
+                drive.getLocalization().getVisibleTagIds(), alliance);
         return AimLogic.calculate(drive.getPose(), drive.getFieldVelocity(),
-                drive.getAngularVelocity(), goal, shooter.getMap(),
-                ShootingConstants.AIM_CONFIG);
+                drive.getAngularVelocity(), goalTarget(),
+                goalSelector.getSelected().getMap(),
+                ShootingConstants.AIM_CONFIG.withGoalRadius(
+                        goalSelector.getSelected().getRadiusInches()));
+    }
+
+    /** The selected goal's position, flipped for the alliance being played. */
+    private Translation2d goalTarget() {
+        return goalSelector.getTargetPosition(alliance);
+    }
+
+    /** Distance from the shooter to the selected goal, standing still. */
+    private double standingDistance() {
+        return AimLogic.shooterDistanceTo(
+                drive.getPose(), goalTarget(), ShootingConstants.AIM_CONFIG);
     }
 
     /**
@@ -141,12 +158,11 @@ public class ShooterMapTuning extends CommandOpMode {
      * off video.
      */
     private void logRow() {
-        Translation2d goal = AllianceFlip.forAlliance(
-                ShootingConstants.GOAL_POSITION, ShootingConstants.AUTHORED_FOR, alliance);
-        double standingDistance = AimLogic.shooterDistanceTo(
-                drive.getPose(), goal, ShootingConstants.AIM_CONFIG);
-        loggedRows.add(String.format(".add(%8.1f, %6.0f, %6.1f,  /* time me */ 0.00)",
-                standingDistance, manualRpm, manualHoodDeg));
+        // Tagged with the goal, because each goal needs its own table when the
+        // heights differ -- rows from two goals must not end up in one map.
+        loggedRows.add(String.format("[%s] .add(%8.1f, %6.0f, %6.1f,  /* time me */ 0.00)",
+                goalSelector.getSelected().getName(),
+                standingDistance(), manualRpm, manualHoodDeg));
     }
 
     @Override
@@ -154,23 +170,22 @@ public class ShooterMapTuning extends CommandOpMode {
         if (opModeInInit()) {
             telemetry.addLine("Shooter Map Tuning");
             telemetry.addData("Alliance", "%s   (X = red, Y = blue)", alliance);
-            telemetry.addData("Goal", ShootingConstants.GOAL_POSITION.toString());
+            telemetry.addData("Goal", goalSelector.getSelected().toString());
+            telemetry.addLine("RB cycles goals (each needs its own table)");
             telemetry.addLine();
             telemetry.addData("Start pose check",
                     drive.getLocalization().getStartPoseCheck());
             telemetry.addLine();
             telemetry.addLine("Check DISTANCE against a tape measure before trusting");
-            telemetry.addLine("anything -- if it disagrees, GOAL_POSITION is wrong.");
+            telemetry.addLine("anything -- if it disagrees, the goal position is wrong.");
             return;
         }
 
         telemetry.addLine("=== SHOOTER MAP TUNING (shot map bypassed) ===");
+        telemetry.addData("Goal", "%s   (RB to cycle)", goalSelector.getSelected().getName());
+        telemetry.addData("Tags seen", drive.getLocalization().getVisibleTagIds().toString());
         if (solution != null) {
-            telemetry.addData("DISTANCE (standing)", "%.1f in",
-                    AimLogic.shooterDistanceTo(drive.getPose(),
-                            AllianceFlip.forAlliance(ShootingConstants.GOAL_POSITION,
-                                    ShootingConstants.AUTHORED_FOR, alliance),
-                            ShootingConstants.AIM_CONFIG));
+            telemetry.addData("DISTANCE (standing)", "%.1f in", standingDistance());
             telemetry.addData("Aimed", gamepad1.left_bumper
                     ? String.format("yes, %.1f deg off",
                             Math.toDegrees(solution.headingErrorFrom(

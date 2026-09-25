@@ -12,9 +12,14 @@
 package org.firstinspires.ftc.teamcode.subsystems;
 
 import com.qualcomm.hardware.limelightvision.LLResult;
+import com.qualcomm.hardware.limelightvision.LLResultTypes;
 import com.qualcomm.hardware.limelightvision.LLStatus;
 import com.qualcomm.hardware.limelightvision.Limelight3A;
 import com.qualcomm.robotcore.hardware.HardwareMap;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 public class LimelightVision {
     private final Limelight3A limelight;
@@ -45,6 +50,28 @@ public class LimelightVision {
     /** Most recent pipeline result. May be null if polling hasn't produced one. */
     public LLResult getLatestResult() {
         return limelight.getLatestResult();
+    }
+
+    /**
+     * IDs of every AprilTag in the current frame.
+     *
+     * Separate from the pose solve: a tag can be seen without contributing a
+     * usable botpose. Goal selection uses this to tell which goals the robot can
+     * actually see. Returns an empty list when there is no frame.
+     */
+    public static List<Integer> visibleTagIds(LLResult result) {
+        List<Integer> ids = new ArrayList<>();
+        if (result == null || !result.isValid()) {
+            return ids;
+        }
+        List<LLResultTypes.FiducialResult> fiducials = result.getFiducialResults();
+        if (fiducials == null) {
+            return ids;
+        }
+        for (LLResultTypes.FiducialResult fiducial : fiducials) {
+            ids.add(fiducial.getFiducialId());
+        }
+        return ids;
     }
 
     public LLStatus getStatus() {

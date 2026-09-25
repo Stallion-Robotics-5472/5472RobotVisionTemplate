@@ -43,6 +43,9 @@ import org.firstinspires.ftc.teamcode.lib.geometry.Pose3d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Translation2d;
 import org.firstinspires.ftc.teamcode.pathing.Localizer;
 
+import java.util.Collections;
+import java.util.List;
+
 public class Localization implements Localizer {
     private final PinpointOdometry odometry;
     /** Null when vision is disabled at construction (odometry-only mode). */
@@ -60,6 +63,7 @@ public class Localization implements Localizer {
     private int lastTagCount = 0;
     private double lastAvgTagDist = 0.0;
     private String lastVisionSource = "none";
+    private List<Integer> lastVisibleTagIds = Collections.emptyList();
 
     // Heading-trust gate. MegaTag2 is only used for position once MegaTag1 --
     // which is computed without the gyro -- has agreed with our heading for
@@ -144,6 +148,7 @@ public class Localization implements Localizer {
         if (!visionEnabled || vision == null) {
             lastVisionAccepted = false;
             lastVisionReject = "vision disabled";
+            lastVisibleTagIds = Collections.emptyList();
             return;
         }
 
@@ -154,7 +159,14 @@ public class Localization implements Localizer {
         vision.updateRobotOrientation(headingDegrees);
 
         // 3) Vision: validate and, if good, fuse it.
-        processVision(vision.getLatestResult(), now);
+        LLResult result = vision.getLatestResult();
+
+        // Which tags are in frame is recorded regardless of whether the pose
+        // solve is usable -- goal selection wants to know what the camera can
+        // see even on a frame we reject for fusion.
+        lastVisibleTagIds = LimelightVision.visibleTagIds(result);
+
+        processVision(result, now);
     }
 
     /** Differentiates the odometry pose into a filtered field velocity. */
@@ -472,6 +484,19 @@ public class Localization implements Localizer {
      */
     public double getHeadingDisagreementDegrees() {
         return Math.toDegrees(lastHeadingDisagreement);
+    }
+
+    /**
+     * AprilTag IDs in the most recent camera frame, empty if none or if vision is
+     * disabled. Used to pick which goal to aim at.
+     */
+    public List<Integer> getVisibleTagIds() {
+        return lastVisibleTagIds;
+    }
+
+    /** True if the given tag was in the most recent frame. */
+    public boolean isTagVisible(int id) {
+        return lastVisibleTagIds.contains(id);
     }
 
     /** Which solver supplied the most recent accepted position. */

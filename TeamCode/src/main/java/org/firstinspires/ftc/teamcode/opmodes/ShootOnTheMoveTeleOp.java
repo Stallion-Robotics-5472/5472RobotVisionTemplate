@@ -14,6 +14,8 @@
  *   RIGHT TRIGGER     fire, once the shot is ready
  *   Y                 re-seed the pose from vision (recovers a bad heading)
  *   back              re-zero driver-forward to the robot's current facing
+ *   A                 cycle the target goal (pins it; overrides auto-select)
+ *   left stick button hand goal choice back to automatic selection
  *   dpad up/down      trim flywheel rpm  +/- 50
  *   dpad left/right   trim hood angle    -/+ 0.5 deg
  *   X                 clear trim
@@ -34,6 +36,7 @@ import org.firstinspires.ftc.teamcode.lib.command.RunCommand;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
 import org.firstinspires.ftc.teamcode.pathing.Alliance;
+import org.firstinspires.ftc.teamcode.shooting.GoalSelector;
 import org.firstinspires.ftc.teamcode.shooting.ShootingConstants;
 import org.firstinspires.ftc.teamcode.subsystems.DriveSubsystem;
 import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem;
@@ -53,6 +56,7 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
     private DriveSubsystem drive;
     private ShooterSubsystem shooter;
     private AimAndShootCommand aimAndShoot;
+    private GoalSelector goalSelector;
 
     private Alliance alliance = Alliance.RED;
     private Rotation2d driverForwardOffset = new Rotation2d(0);
@@ -67,8 +71,10 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
 
         // Alliance select during init. Only the driver's point of view and which
         // goal we aim at change; the pose frame is absolute either way.
-        whileHeld(() -> gamepad1.b, Commands.runOnce(() -> alliance = Alliance.RED));
-        whileHeld(() -> gamepad1.x, Commands.runOnce(() -> alliance = Alliance.BLUE));
+        whenPressed(() -> gamepad1.b && opModeInInit(),
+                Commands.runOnce(() -> alliance = Alliance.RED));
+        whenPressed(() -> gamepad1.x && opModeInInit(),
+                Commands.runOnce(() -> alliance = Alliance.BLUE));
 
         // Default: ordinary driver control of both translation and heading.
         setDefaultCommand(drive, new RunCommand(() -> {
@@ -85,13 +91,22 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
 
         // The main event. Requires both subsystems, so it displaces both default
         // commands while held and they resume when released.
+        goalSelector = ShootingConstants.newGoalSelector();
         aimAndShoot = new AimAndShootCommand(
                 drive, shooter,
                 () -> -gamepad1.left_stick_y * (gamepad1.right_bumper ? SLOW_SCALE : 1.0),
                 () -> -gamepad1.left_stick_x * (gamepad1.right_bumper ? SLOW_SCALE : 1.0),
                 () -> alliance,
-                () -> gamepad1.right_trigger > 0.5);
+                () -> gamepad1.right_trigger > 0.5,
+                goalSelector);
         whileHeld(() -> gamepad1.left_bumper, aimAndShoot);
+
+        // Goal override. The selector normally picks by AprilTag visibility, but a
+        // driver who can see the field knows things the camera does not.
+        whenPressed(() -> gamepad1.a && !opModeInInit(),
+                Commands.runOnce(goalSelector::cycle));
+        whenPressed(() -> gamepad1.left_stick_button,
+                Commands.runOnce(() -> goalSelector.auto(ShootingConstants.GOAL_STRATEGY)));
 
         // Recovery: snap the pose to what the camera sees. Uses MegaTag1, so it
         // can fix a heading the gyro has wrong.
@@ -131,11 +146,15 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
             }
             telemetry.addLine();
             telemetry.addLine("LB = aim  |  RT = fire  |  Y = re-seed from vision");
+            telemetry.addData("Goals", "%d configured, strategy %s",
+                    ShootingConstants.GOALS.length, ShootingConstants.GOAL_STRATEGY);
             return;
         }
 
         telemetry.addData("Mode", getScheduler().isScheduled(aimAndShoot)
                 ? "AIMING" : "driver control");
+        telemetry.addData("Goal", goalSelector.describe());
+        telemetry.addData("Tags seen", drive.getLocalization().getVisibleTagIds().toString());
         if (getScheduler().isScheduled(aimAndShoot)) {
             telemetry.addData("Shot", aimAndShoot.getStatus());
             if (aimAndShoot.getSolution() != null) {

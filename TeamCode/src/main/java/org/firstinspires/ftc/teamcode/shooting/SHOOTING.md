@@ -138,24 +138,33 @@ shot. Even a rough value beats zero by a mile.
 Everything lives in [`ShootingConstants.java`](ShootingConstants.java), in the
 order you should fill it in.
 
-### 1. The goal position — nothing works until this is right
+### 1. The goals — nothing works until these are right
 
 ```java
-public static final Translation2d GOAL_POSITION = new Translation2d(0.0, 60.0);
+public static final Goal[] GOALS = {
+        Goal.named("primary", 0.0, 60.0)
+                .tags(/* TODO: real tag IDs */)
+                .radius(6.0)
+                .worth(1)
+                .build(),
+};
 ```
 
-**The shipped value is a placeholder.** Get the real one either from the season's
-field drawings (converted into this template's frame: origin at field centre, +X
-right, +Y away from the audience) or by measuring:
+**The shipped entry is a placeholder and will aim at empty field.** These cannot be
+guessed — read them off the season's Competition Manual and field drawings. For each
+goal you need:
 
-1. Run **Shooter Map Tuning**.
-2. Park at a known spot and compare the `DISTANCE` readout to a tape measure.
-3. Adjust `GOAL_POSITION` until they agree.
+- **Position**, in this template's frame (origin at field centre, +X right, +Y away
+  from the audience, inches). Aim at the point the piece must pass *through* — the
+  middle of the opening, not of the structure.
+- **Tag IDs** on or beside it, for `TAG_VISIBLE` selection.
+- **Its own shot map**, if its height differs from the others.
+- **What it scores**, if you want `BEST_VALUE` to use it.
 
-Aim at the point the piece must pass through — the middle of the *opening*, not
-the middle of the structure.
+To check a position: run **Shooter Map Tuning**, park somewhere, and compare the
+`DISTANCE` readout against a tape measure to that goal. Adjust until they agree.
 
-`GOAL_RADIUS_IN` is the effective half-width of that opening and sets the heading
+`radius` is the effective half-width of the opening and sets the heading
 tolerance. Use less than the true half-width: the piece has size, the pose has
 error, the shot has spread. Two thirds is a fair start.
 
@@ -186,7 +195,7 @@ An OpMode (group `Setup`) ported from the FRC `MAP_TUNING` state. The robot
 shot map is **bypassed** and rpm/hood come from what you dial in.
 
 1. Check `DISTANCE` against a tape measure first. If they disagree, stop —
-   `GOAL_POSITION` or the start pose is wrong and nothing else will work.
+   the goal's position or the start pose is wrong and nothing else will work.
 2. Park at a distance. Hold **LB** to aim; let it settle.
 3. `dpad up/down` for rpm, `dpad left/right` for hood. **RT** to fire.
 4. When shots go in, press **A** to log the row. It appears on screen as a
@@ -248,13 +257,101 @@ seeded pose — as it must, since there is nothing else to go on.
 
 ---
 
-## Alliances
+## Choosing which goal to shoot at
 
-The goal is on one side of the field, so it flips:
+BIOBUZZ scores on **hives and flowers**, so there is more than one thing to shoot
+at. `GoalSelector` picks one each loop.
+
+A `Goal` is more than a coordinate:
 
 ```java
-Translation2d goal = AllianceFlip.forAlliance(
-        ShootingConstants.GOAL_POSITION, ShootingConstants.AUTHORED_FOR, alliance);
+Goal.named("high", 0.0, 60.0)
+        .tags(21, 22)          // AprilTags that identify it
+        .radius(8.0)           // its opening's half-width
+        .worth(5)              // points, for the best-value strategy
+        .map(HIGH_SHOT_MAP)    // its OWN curve -- a different height needs one
+        .build();
+```
+
+Two of those deserve a note. **Tags** are how the robot tells which goal it is
+looking at. And a goal at a different **height needs its own shot table** — one
+flywheel/hood curve cannot serve two heights, so `Goal.map(...)` overrides the
+shared default and `AimAndShootCommand` looks the shot up in the selected goal's
+map.
+
+### Strategies
+
+| Strategy | Picks |
+|---|---|
+| `FIXED` | one goal, chosen by the driver or pinned in code |
+| `NEAREST` | the closest |
+| `LEAST_ROTATION` | whichever needs the least turning from where you point now |
+| **`TAG_VISIBLE`** | goals whose AprilTags the camera can currently identify, ties broken by point value then distance |
+| `BEST_VALUE` | the highest-value goal actually in range |
+
+`TAG_VISIBLE` is the default. If no goal's tags are in frame it **falls back to
+`NEAREST`** rather than refusing to aim — not seeing a tag usually just means the
+camera is pointed somewhere else, which is no reason to give up.
+
+### Tag semantics — check the manual
+
+```java
+public static final GoalSelector.TagMeaning GOAL_TAG_MEANING =
+        GoalSelector.TagMeaning.VISIBLE_MEANS_AVAILABLE;
+```
+
+If tags simply sit beside each goal, seeing one identifies it — that is
+`VISIBLE_MEANS_AVAILABLE`. If instead a tag gets **covered** as its goal fills up
+or is claimed, then the *hidden* tag marks the available goal, and you want
+`HIDDEN_MEANS_AVAILABLE`. Get it backwards and the robot prefers exactly the wrong
+goals. Read the Competition Manual and set it to match.
+
+### Why switching is deliberately sluggish
+
+This is the part worth understanding. On a turretless robot the selected goal sets
+**the whole chassis heading**. AprilTag visibility flickers constantly while
+driving — a tag clips the edge of frame, a game piece passes in front of it — and a
+selector that switched on a single frame would swing the robot back and forth
+between two headings and never settle enough to shoot at either. A turret could
+absorb that. A chassis cannot.
+
+So a switch has to be *earned*: a challenger must win `GOAL_SWITCH_FRAMES`
+consecutive updates (default 12, about a fifth of a second) before it takes over,
+and selection is **frozen outright while a shot is being fed**, so the target
+cannot change out from under a shot in progress. The cost is a fraction of a
+second of staleness after the picture genuinely changes — far cheaper than
+oscillation.
+
+The suite tests exactly this: a single flickering frame must not switch, an
+intermittent challenger must *never* take over, and a frozen selector must not
+change at all.
+
+### Driver override
+
+The camera does not know everything the driver can see:
+
+| Control (in `ShootOnTheMoveTeleOp`) | Does |
+|---|---|
+| `A` | cycle the target goal, pinning it |
+| left stick button | hand choice back to automatic selection |
+
+Telemetry shows the current goal, why it was chosen, any challenger and its
+streak, and which tags are in frame.
+
+### A single-goal game
+
+Leave one entry in `GOALS` and selection is a no-op — every strategy returns it.
+No need to change anything else.
+
+---
+
+## Alliances
+
+Goals are written for one alliance and flipped at run time. `GoalSelector` does it
+for you:
+
+```java
+Translation2d goal = selector.getTargetPosition(alliance);
 ```
 
 Nothing else changes. The field frame is absolute, the shot table is
@@ -301,4 +398,7 @@ proves the maths does what it claims.
 | Rotation oscillates while locked | `HEADING_kP` / `HEADING_kD` in `PathConstants` |
 | Never fires | read `getStatus()` on the telemetry line |
 | Fires but shots are short | flywheel not actually at speed — tighten `FLYWHEEL_TOLERANCE_RPM`, tune `FLYWHEEL_F` |
-| Distance readout disagrees with tape | `GOAL_POSITION`, or the seeded start pose |
+| Distance readout disagrees with tape | the goal's position, or the seeded start pose |
+| Robot swings between two goals | `GOAL_SWITCH_FRAMES` too low |
+| Always aims at the wrong goal | `GOAL_TAG_MEANING` inverted, or wrong tag IDs |
+| Shot is wrong on one goal only | that goal needs its own `.map(...)` |

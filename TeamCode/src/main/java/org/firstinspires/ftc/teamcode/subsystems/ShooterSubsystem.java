@@ -121,10 +121,19 @@ public class ShooterSubsystem extends SubsystemBase {
      * Does nothing in manual mode, so a tuning session is not fought by the map.
      */
     public void setShotForDistance(double distanceInches) {
+        setShotFrom(map, distanceInches);
+    }
+
+    /**
+     * Same, but from a specific shot table. Goals at different heights need
+     * different curves, so the aiming layer passes the selected goal's own map.
+     */
+    public void setShotFrom(ShooterMap shotMap, double distanceInches) {
         if (manualMode) {
             return;
         }
-        ShooterSetpoint setpoint = map.setpointAt(distanceInches).withTrim(rpmTrim, hoodTrimDeg);
+        ShooterSetpoint setpoint =
+                shotMap.setpointAt(distanceInches).withTrim(rpmTrim, hoodTrimDeg);
         setFlywheelRpm(setpoint.flywheelRpm);
         setHoodDegrees(setpoint.hoodDegrees);
     }

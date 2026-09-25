@@ -17,38 +17,95 @@ public final class ShootingConstants {
     private ShootingConstants() {}
 
     // =====================================================================
-    // 1. THE GOAL  -- YOU MUST SET THIS
+    // 1. THE GOALS  -- YOU MUST FILL THESE IN FROM THE GAME MANUAL
     // =====================================================================
     /**
-     * Field position of the goal you shoot into, for the alliance the code is
-     * authored for (see AUTHORED_FOR below), in inches.
-     *
-     * THE SHIPPED VALUE IS A PLACEHOLDER. Nothing can aim correctly until it is
-     * the real thing. Two ways to get it:
-     *
-     *   - Read it off the season's field drawings, converting into this frame
-     *     (origin at field centre, +X right, +Y away from the audience).
-     *   - Or measure it: put the robot at a known pose, run the "Shooter Map
-     *     Tuning" OpMode, and drive until the reported distance matches a tape
-     *     measure to the goal. Adjust until they agree.
-     *
-     * Aim at the point the piece must pass through -- the middle of the opening,
-     * not the middle of the whole structure.
+     * The alliance every position in this file is written for. Positions are
+     * flipped to the other alliance at run time by GoalSelector.
      */
-    public static final Translation2d GOAL_POSITION = new Translation2d(0.0, 60.0);
-
-    /** The alliance {@link #GOAL_POSITION} was written for. */
     public static final org.firstinspires.ftc.teamcode.pathing.Alliance AUTHORED_FOR =
             org.firstinspires.ftc.teamcode.pathing.Alliance.RED;
 
     /**
-     * Effective half-width of the goal opening, inches -- how far off-centre a
-     * shot can land and still score. This sets the heading tolerance, which
-     * tightens automatically with distance.
+     * Every goal the robot can shoot at.
+     *
+     * THE ROWS BELOW ARE PLACEHOLDERS. Nothing aims correctly until they are the
+     * real thing, and they cannot be guessed -- read them off the season's
+     * Competition Manual and field drawings. For each goal you need:
+     *
+     *   - its field position, in this template's frame (origin at field centre,
+     *     +X right, +Y away from the audience, inches). Aim at the point the piece
+     *     must pass THROUGH -- the middle of the opening, not of the structure.
+     *   - the AprilTag IDs on or beside it, so the robot can tell which goal it is
+     *     looking at. See GoalSelector.Strategy.TAG_VISIBLE.
+     *   - its own shot table IF its height differs from the others. One flywheel
+     *     and hood curve cannot serve two heights.
+     *   - what it scores, if you want the best-value strategy to use it.
+     *
+     * To sanity-check a position: run "Shooter Map Tuning", park somewhere, and
+     * compare the DISTANCE readout against a tape measure to that goal.
+     *
+     * A single-goal game is fine -- leave one entry and selection is a no-op.
+     */
+    public static final Goal[] GOALS = {
+            Goal.named("primary", 0.0, 60.0)
+                    .tags(/* TODO: real tag IDs from the field drawings */)
+                    .radius(6.0)
+                    .worth(1)
+                    .build(),
+            // A second goal, as an example of the shape. DELETE IT or replace it
+            // with the real thing -- shipped as-is it will aim at empty field.
+            // Goal.named("secondary", 0.0, 40.0)
+            //         .tags(/* TODO */)
+            //         .radius(8.0)
+            //         .worth(3)
+            //         .map(SECONDARY_SHOT_MAP)   // its own curve, different height
+            //         .build(),
+    };
+
+    /**
+     * How the robot picks between {@link #GOALS}.
+     *
+     * TAG_VISIBLE prefers goals whose AprilTags the camera can currently identify,
+     * falling back to the nearest when none are in frame. With one goal any
+     * strategy behaves identically.
+     */
+    public static final GoalSelector.Strategy GOAL_STRATEGY =
+            GoalSelector.Strategy.TAG_VISIBLE;
+
+    /**
+     * What a tag being in frame means about its goal. CHECK THE MANUAL: if tags sit
+     * beside each goal, seeing one identifies it (VISIBLE_MEANS_AVAILABLE); if a
+     * tag is instead covered as its goal fills or is claimed, the HIDDEN one is the
+     * available one. Backwards, the robot prefers exactly the wrong goals.
+     */
+    public static final GoalSelector.TagMeaning GOAL_TAG_MEANING =
+            GoalSelector.TagMeaning.VISIBLE_MEANS_AVAILABLE;
+
+    /**
+     * Consecutive updates a different goal must win before the robot switches to
+     * it. Without this the robot swings between headings every time a tag flickers
+     * at the edge of frame -- see GoalSelector. About 12 loops is a fifth of a
+     * second at typical FTC loop rates.
+     */
+    public static final int GOAL_SWITCH_FRAMES = 12;
+
+    /** Builds a selector over {@link #GOALS} with the settings above. */
+    public static GoalSelector newGoalSelector() {
+        return new GoalSelector(GOAL_STRATEGY, GOALS)
+                .withTagMeaning(GOAL_TAG_MEANING)
+                .withSwitchFrames(GOAL_SWITCH_FRAMES);
+    }
+
+    /**
+     * Default effective half-width of a goal opening, inches -- how far off-centre
+     * a shot can land and still score. Sets the heading tolerance, which then
+     * tightens automatically with distance. A goal may override it with
+     * {@code Goal.Builder.radius(...)}.
      *
      * Use something smaller than the true half-width: the piece has size, your
-     * pose estimate has error, and the shot has spread. Two thirds of the true
-     * half-width is a reasonable starting point.
+     * pose estimate has error, and the shot has spread. Two thirds is a reasonable
+     * starting point.
      */
     public static final double GOAL_RADIUS_IN = 6.0;
 

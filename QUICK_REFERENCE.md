@@ -168,6 +168,7 @@ Returns the original untouched when the alliances match. Default symmetry is
 | dpad left/right | hood ∓0.5° |
 | `A` | log the current row |
 | `B` | clear the log |
+| right bumper | cycle which goal you are tuning |
 
 ---
 
@@ -182,9 +183,14 @@ s.headingFeedforwardRadPerSec    // sweep rate; add to the heading controller
 s.effectiveDistanceInches        // look the shot up with THIS, not the actual distance
 s.canShootFrom(currentHeading)   // in range AND pointed correctly
 
-// the goal is alliance-dependent
-Translation2d goal = AllianceFlip.forAlliance(
-        ShootingConstants.GOAL_POSITION, ShootingConstants.AUTHORED_FOR, alliance);
+// goal selection (handles alliance flipping for you)
+GoalSelector sel = ShootingConstants.newGoalSelector();
+Goal g = sel.update(pose, localization.getVisibleTagIds(), alliance);
+Translation2d goal = sel.getTargetPosition(alliance);
+sel.lockTo("high") / cycle() / auto(strategy) / freeze(true)
+sel.describe()                   // one telemetry line
+
+Goal.named("high", 0, 60).tags(21, 22).radius(8).worth(5).map(HIGH_MAP).build();
 
 // shot table
 ShooterMap map = ShooterMap.builder()
@@ -277,9 +283,12 @@ one group. The scheduler is per-OpMode, **not** a static singleton.
 
 | Constant | Default | Meaning |
 |---|---|---|
-| `GOAL_POSITION` | `(0, 60)` | **PLACEHOLDER — set this.** Goal field position, inches |
-| `AUTHORED_FOR` | `RED` | Alliance the goal position is written for |
-| `GOAL_RADIUS_IN` | `6.0` | Effective half-width; sets the heading tolerance |
+| `GOALS` | 1 placeholder | **PLACEHOLDER — set these.** Each goal's position, tag IDs, radius, value, own shot map |
+| `AUTHORED_FOR` | `RED` | Alliance the goal positions are written for |
+| `GOAL_STRATEGY` | `TAG_VISIBLE` | How the robot picks a goal |
+| `GOAL_TAG_MEANING` | `VISIBLE_MEANS_AVAILABLE` | **Check the manual** — invert if a covered tag marks the open goal |
+| `GOAL_SWITCH_FRAMES` | `12` | Frames a challenger must win before the chassis re-aims |
+| `GOAL_RADIUS_IN` | `6.0` | Default opening half-width; sets the heading tolerance |
 | `SHOOTER_FORWARD/LEFT_OFFSET_IN` | `0.0` | Shooter position from the turn centre |
 | `SHOOTER_YAW_OFFSET_DEG` | `0.0` | 0 = fires forward, 180 = out the back |
 | `PHASE_DELAY_SECONDS` | `0.02` | Control-latency lookahead |
@@ -390,7 +399,9 @@ Telemetry shows `Vision source: MegaTag2 | heading TRUSTED`.
 | Points 180° wrong | `SHOOTER_YAW_OFFSET_DEG` |
 | Always trails a moving aim | raise `PHASE_DELAY_SECONDS`; check `TURN_POWER_PER_RAD_PER_SEC` in `DriveSubsystem` |
 | Never fires | read `AimAndShootCommand.getStatus()` — it names the blocker |
-| Distance disagrees with tape | `GOAL_POSITION`, or the seeded start pose |
+| Distance disagrees with tape | the goal's position, or the seeded start pose |
+| Robot swings between two goals | `GOAL_SWITCH_FRAMES` too low |
+| Always picks the wrong goal | `GOAL_TAG_MEANING` inverted, or wrong tag IDs |
 
 Distances are **inches**. The FRC original was metres.
 

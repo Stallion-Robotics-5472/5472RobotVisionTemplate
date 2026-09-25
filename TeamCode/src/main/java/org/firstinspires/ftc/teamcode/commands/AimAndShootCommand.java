@@ -26,9 +26,10 @@ package org.firstinspires.ftc.teamcode.commands;
 import org.firstinspires.ftc.teamcode.lib.command.Command;
 import org.firstinspires.ftc.teamcode.lib.geometry.Translation2d;
 import org.firstinspires.ftc.teamcode.pathing.Alliance;
-import org.firstinspires.ftc.teamcode.pathing.AllianceFlip;
 import org.firstinspires.ftc.teamcode.shooting.AimLogic;
 import org.firstinspires.ftc.teamcode.shooting.AimSolution;
+import org.firstinspires.ftc.teamcode.shooting.Goal;
+import org.firstinspires.ftc.teamcode.shooting.GoalSelector;
 import org.firstinspires.ftc.teamcode.shooting.ShootingConstants;
 import org.firstinspires.ftc.teamcode.subsystems.DriveSubsystem;
 import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem;
@@ -48,8 +49,10 @@ public class AimAndShootCommand extends Command {
 
     /** When false, aim and spin up but never feed. */
     private final boolean allowFeed;
+    private final GoalSelector goalSelector;
 
     private AimSolution solution;
+    private Goal targetGoal;
     private boolean lastReady = false;
 
     /**
@@ -66,13 +69,24 @@ public class AimAndShootCommand extends Command {
     public AimAndShootCommand(DriveSubsystem drive, ShooterSubsystem shooter,
                               DoubleSupplier driverForward, DoubleSupplier driverLeft,
                               Supplier<Alliance> alliance, BooleanSupplier fireRequested) {
-        this(drive, shooter, driverForward, driverLeft, alliance, fireRequested, true);
+        this(drive, shooter, driverForward, driverLeft, alliance, fireRequested, true,
+                ShootingConstants.newGoalSelector());
+    }
+
+    /** As above, sharing a GoalSelector so the OpMode can read or override it. */
+    public AimAndShootCommand(DriveSubsystem drive, ShooterSubsystem shooter,
+                              DoubleSupplier driverForward, DoubleSupplier driverLeft,
+                              Supplier<Alliance> alliance, BooleanSupplier fireRequested,
+                              GoalSelector goalSelector) {
+        this(drive, shooter, driverForward, driverLeft, alliance, fireRequested, true,
+                goalSelector);
     }
 
     public AimAndShootCommand(DriveSubsystem drive, ShooterSubsystem shooter,
                               DoubleSupplier driverForward, DoubleSupplier driverLeft,
                               Supplier<Alliance> alliance, BooleanSupplier fireRequested,
-                              boolean allowFeed) {
+                              boolean allowFeed, GoalSelector goalSelector) {
+        this.goalSelector = goalSelector;
         this.drive = drive;
         this.shooter = shooter;
         this.driverForward = driverForward;
@@ -92,37 +106,46 @@ public class AimAndShootCommand extends Command {
 
     @Override
     public void execute() {
-        // The goal lives on one side of the field; flip it for the other.
-        Translation2d goal = AllianceFlip.forAlliance(
-                ShootingConstants.GOAL_POSITION, ShootingConstants.AUTHORED_FOR,
-                alliance.get());
+        Alliance playing = alliance.get();
+
+        // Which goal to shoot at. The selector prefers goals the camera can
+        // identify by their AprilTags, and will not switch on a single flickering
+        // frame -- on a turretless robot a switch moves the whole chassis.
+        targetGoal = goalSelector.update(
+                drive.getPose(), drive.getLocalization().getVisibleTagIds(), playing);
+        Translation2d goal = GoalSelector.positionFor(targetGoal, playing);
 
         solution = AimLogic.calculate(
                 drive.getPose(),
                 drive.getFieldVelocity(),
                 drive.getAngularVelocity(),
                 goal,
-                shooter.getMap(),
-                ShootingConstants.AIM_CONFIG);
+                targetGoal.getMap(),
+                // This goal's opening may be a different size from the default.
+                ShootingConstants.AIM_CONFIG.withGoalRadius(targetGoal.getRadiusInches()));
 
         // Driver keeps translation; the solution owns heading. The feedforward is
         // what lets the robot track a sweeping aim instead of trailing it.
         Translation2d fieldVector = new Translation2d(
                 driverForward.getAsDouble(), driverLeft.getAsDouble())
-                .rotateBy(alliance.get().driverForward());
+                .rotateBy(playing.driverForward());
         drive.driveWithHeadingLock(fieldVector.getX(), fieldVector.getY(),
                 solution.targetHeadingRadians, solution.headingFeedforwardRadPerSec);
 
         // Spin up for the EFFECTIVE distance -- the distance the shot actually
         // has to cover given the robot's motion, not the straight-line distance.
-        shooter.setShotForDistance(solution.effectiveDistanceInches);
+        shooter.setShotFrom(targetGoal.getMap(), solution.effectiveDistanceInches);
 
         lastReady = isReadyToFire();
-        if (allowFeed && lastReady && fireRequested.getAsBoolean()) {
+        boolean feeding = allowFeed && lastReady && fireRequested.getAsBoolean();
+        if (feeding) {
             shooter.runFeeder();
         } else {
             shooter.stopFeeder();
         }
+
+        // Never let the target change out from under a shot in progress.
+        goalSelector.freeze(feeding);
     }
 
     /** Every condition that must hold before a piece is fed. */
@@ -153,6 +176,16 @@ public class AimAndShootCommand extends Command {
         shooter.stopFeeder();
         shooter.idle();
         drive.stop();
+        goalSelector.freeze(false);
+    }
+
+    /** The goal being aimed at. Null before the first loop. */
+    public Goal getTargetGoal() {
+        return targetGoal;
+    }
+
+    public GoalSelector getGoalSelector() {
+        return goalSelector;
     }
 
     /** The most recent solution, for telemetry. Null before the first loop. */
@@ -170,7 +203,8 @@ public class AimAndShootCommand extends Command {
             return "no solution yet";
         }
         if (!solution.inRange) {
-            return String.format("out of range (%.0f in)", solution.effectiveDistanceInches);
+            return String.format("%s out of range (%.0f in)",
+                    targetGoal.getName(), solution.effectiveDistanceInches);
         }
         if (!isPoseTrustworthy()) {
             return "pose not trusted - vision has not vouched for the heading";

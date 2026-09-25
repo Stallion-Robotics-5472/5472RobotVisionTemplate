@@ -14,6 +14,14 @@ public class LLResult {
     public double avgDist = 30.0;
     public double captureLatency = 10.0;
     public double targetingLatency = 5.0;
+    /** Tags "in frame", for goal-selection tests. */
+    public java.util.List<LLResultTypes.FiducialResult> fiducials = new java.util.ArrayList<>();
+
+    /** Convenience for tests: declare which tag IDs are in frame. */
+    public LLResult withTags(int... ids) {
+        for (int id : ids) fiducials.add(new LLResultTypes.FiducialResult(id));
+        return this;
+    }
 
     public boolean isValid() { return valid; }
     public int getBotposeTagCount() { return tagCount; }
@@ -23,4 +31,5 @@ public class LLResult {
     public double getBotposeAvgDist() { return avgDist; }
     public double getCaptureLatency() { return captureLatency; }
     public double getTargetingLatency() { return targetingLatency; }
+    public java.util.List<LLResultTypes.FiducialResult> getFiducialResults() { return fiducials; }
 }
