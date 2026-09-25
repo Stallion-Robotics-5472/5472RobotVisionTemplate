@@ -40,6 +40,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.Position;
 import org.firstinspires.ftc.teamcode.lib.estimator.PoseEstimator;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose3d;
+import org.firstinspires.ftc.teamcode.lib.geometry.Translation2d;
 import org.firstinspires.ftc.teamcode.pathing.Localizer;
 
 public class Localization implements Localizer {
@@ -70,6 +71,14 @@ public class Localization implements Localizer {
     // Outlier-rejection bookkeeping.
     private int acceptedFrames = 0;
     private int consecutiveJumpRejects = 0;
+
+    // Velocity, differentiated from the ODOMETRY pose (never the fused pose --
+    // a vision correction is a step, and differentiating a step gives a huge
+    // false spike). Used by shoot-on-the-move.
+    private Pose2d prevOdometryPose = null;
+    private double prevOdometryTime = Double.NaN;
+    private Translation2d fieldVelocity = new Translation2d();
+    private double omegaRadPerSec = 0.0;
 
     // Full 3D pose from the most recent valid vision frame. Only x/y/yaw are
     // fused into the 2D estimate (the robot drives on the floor); z/pitch/roll
@@ -112,6 +121,13 @@ public class Localization implements Localizer {
         headingAgreementFrames = 0;
         acceptedFrames = 0;
         consecutiveJumpRejects = 0;
+
+        // The pose just teleported, so any velocity differentiated across that
+        // jump would be nonsense.
+        prevOdometryPose = null;
+        prevOdometryTime = Double.NaN;
+        fieldVelocity = new Translation2d();
+        omegaRadPerSec = 0.0;
     }
 
     /** Runs one fusion cycle. Call once per loop. */
@@ -122,6 +138,7 @@ public class Localization implements Localizer {
         odometry.update();
         lastOdometryPose = odometry.getPose();
         poseEstimator.updateWithTime(now, lastOdometryPose);
+        updateVelocity(lastOdometryPose, now);
 
         // Vision disabled (or no Limelight): odometry-only, skip the rest.
         if (!visionEnabled || vision == null) {
@@ -138,6 +155,45 @@ public class Localization implements Localizer {
 
         // 3) Vision: validate and, if good, fuse it.
         processVision(vision.getLatestResult(), now);
+    }
+
+    /** Differentiates the odometry pose into a filtered field velocity. */
+    private void updateVelocity(Pose2d odometryPose, double now) {
+        if (prevOdometryPose != null && !Double.isNaN(prevOdometryTime)) {
+            double dt = now - prevOdometryTime;
+            if (dt > 1e-6 && dt < VisionConstants.MAX_VELOCITY_DT_SECONDS) {
+                double vx = (odometryPose.getX() - prevOdometryPose.getX()) / dt;
+                double vy = (odometryPose.getY() - prevOdometryPose.getY()) / dt;
+                double omega = shortestAngle(
+                        odometryPose.getHeading() - prevOdometryPose.getHeading()) / dt;
+
+                double a = VisionConstants.VELOCITY_FILTER_ALPHA;
+                fieldVelocity = new Translation2d(
+                        fieldVelocity.getX() + a * (vx - fieldVelocity.getX()),
+                        fieldVelocity.getY() + a * (vy - fieldVelocity.getY()));
+                omegaRadPerSec += a * (omega - omegaRadPerSec);
+            }
+        }
+        prevOdometryPose = odometryPose;
+        prevOdometryTime = now;
+    }
+
+    /**
+     * Filtered translational velocity in FIELD coordinates, inches/sec. This is
+     * what the shoot-on-the-move aiming maths runs on.
+     */
+    public Translation2d getFieldVelocity() {
+        return fieldVelocity;
+    }
+
+    /** Filtered angular velocity, radians/sec CCW. */
+    public double getAngularVelocity() {
+        return omegaRadPerSec;
+    }
+
+    /** Speed regardless of direction, inches/sec. */
+    public double getSpeed() {
+        return fieldVelocity.getNorm();
     }
 
     /**

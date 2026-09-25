@@ -13,6 +13,11 @@ public class HardwareMap {
     public <T> T get(Class<? extends T> c, String name) {
         Object registered = devices.get(name);
         if (registered != null) return (T) registered;
+        // DcMotor is an interface in the real SDK; hand out the stub's concrete
+        // motor so subsystems can be constructed offline.
+        if (c == DcMotor.class || c == DcMotorSimple.class) {
+            return (T) new BasicMotor();
+        }
         try {
             return c.getDeclaredConstructor().newInstance();
         } catch (Exception e) {

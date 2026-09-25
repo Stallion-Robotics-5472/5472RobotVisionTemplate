@@ -247,6 +247,29 @@ public final class VisionConstants {
     public static final double HEADING_SEED_WARN_THRESHOLD = Math.toRadians(45.0);
 
     // ---------------------------------------------------------------------
+    // Velocity estimation.
+    //
+    // Shoot-on-the-move needs to know how fast the robot is travelling. Velocity
+    // is differentiated from the ODOMETRY pose, not the fused pose: a vision
+    // correction moves the fused pose in a step, and differentiating a step
+    // produces a huge false velocity spike that would throw the shot. Odometry is
+    // smooth and locally accurate, which is exactly what a derivative needs.
+    // ---------------------------------------------------------------------
+
+    /**
+     * Low-pass weight for the new velocity sample each loop, 0..1. Lower is
+     * smoother but lags more. Differentiating encoder counts is inherently
+     * noisy, so some filtering is needed; 0.3 is a reasonable start.
+     */
+    public static final double VELOCITY_FILTER_ALPHA = 0.3;
+
+    /**
+     * Ignore velocity samples taken over a longer gap than this (seconds). A
+     * stalled loop would otherwise produce a meaningless derivative.
+     */
+    public static final double MAX_VELOCITY_DT_SECONDS = 0.25;
+
+    // ---------------------------------------------------------------------
     // Outlier rejection.
     // ---------------------------------------------------------------------
     /**
