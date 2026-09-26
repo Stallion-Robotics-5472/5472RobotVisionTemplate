@@ -11,11 +11,16 @@
  */
 package org.firstinspires.ftc.teamcode.pathing;
 
+import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Translation2d;
 
 public class Path {
-    public enum HeadingMode { TANGENT, LINEAR, CONSTANT }
+    /**
+     * CUSTOM means the heading comes from a {@link HeadingSource} rather than one
+     * of the built-in rules -- that is how "keep aiming at the goal" works.
+     */
+    public enum HeadingMode { TANGENT, LINEAR, CONSTANT, CUSTOM }
 
     private final BezierCurve curve;
     private HeadingMode headingMode = HeadingMode.TANGENT;
@@ -23,6 +28,8 @@ public class Path {
     private double constantHeading = 0.0;
     private double startHeading = 0.0;
     private double endHeading = 0.0;
+    private HeadingSource headingSource = null;
+    private final java.util.List<PathMarker> markers = new java.util.ArrayList<>();
 
     // Resolution of the coarse closest-point scan.
     private int searchSteps = 200;
@@ -58,6 +65,68 @@ public class Path {
         this.headingMode = HeadingMode.CONSTANT;
         this.constantHeading = headingRad;
         return this;
+    }
+
+    /**
+     * Takes heading from a {@link HeadingSource} instead of a built-in rule. Use
+     * this with {@code AimAtGoalHeading} to follow a path while tracking a goal.
+     *
+     * A custom source is responsible for its own alliance handling -- AllianceFlip
+     * carries the source across unchanged rather than trying to transform it,
+     * because it cannot know what the source means. AimAtGoalHeading is fine
+     * because its GoalSelector already flips the goal at run time.
+     */
+    public Path setHeadingSource(HeadingSource source) {
+        if (source == null) {
+            throw new IllegalArgumentException("heading source cannot be null");
+        }
+        this.headingMode = HeadingMode.CUSTOM;
+        this.headingSource = source;
+        return this;
+    }
+
+    /** The custom heading source, or null when a built-in rule is in use. */
+    public HeadingSource getHeadingSource() {
+        return headingSource;
+    }
+
+    // ----- markers: actions fired partway along the path -----
+
+    /**
+     * Adds an action fired partway along this path. See {@link PathMarker}.
+     * Keep the action short -- it runs inside the follower's control loop.
+     */
+    public Path addMarker(PathMarker marker) {
+        if (marker == null) {
+            throw new IllegalArgumentException("marker cannot be null");
+        }
+        markers.add(marker);
+        return this;
+    }
+
+    public java.util.List<PathMarker> getMarkers() {
+        return java.util.Collections.unmodifiableList(markers);
+    }
+
+    /**
+     * Fires any markers whose threshold has been crossed, and returns how many
+     * ran. Called by the follower each loop.
+     */
+    int pollMarkers(double t, double remainingInches) {
+        int fired = 0;
+        for (int i = 0; i < markers.size(); i++) {
+            if (markers.get(i).poll(t, remainingInches)) {
+                fired++;
+            }
+        }
+        return fired;
+    }
+
+    /** Re-arms every marker, so a path can be run again. */
+    void rearmMarkers() {
+        for (int i = 0; i < markers.size(); i++) {
+            markers.get(i).rearm();
+        }
     }
 
     public Path setSearchSteps(int steps) {
@@ -115,7 +184,36 @@ public class Path {
         return curve.getCurvature(t);
     }
 
-    /** Target heading (radians) at parameter t, per the configured mode. */
+    /**
+     * The heading to hold right now, plus how fast that heading is sweeping.
+     *
+     * @param t progress along the path, 0..1.
+     * @param pose current fused pose, used by a custom source.
+     * @param fieldVelocity field-frame velocity (in/sec), used by a custom source.
+     * @param omegaRadPerSec angular velocity (rad/sec CCW), used by a custom source.
+     */
+    public HeadingSource.Target getHeadingTarget(double t, Pose2d pose,
+                                                 Translation2d fieldVelocity,
+                                                 double omegaRadPerSec) {
+        if (headingMode == HeadingMode.CUSTOM && headingSource != null) {
+            return headingSource.compute(t, pose, fieldVelocity, omegaRadPerSec);
+        }
+        return HeadingSource.Target.of(getHeading(t));
+    }
+
+    /** Resets a custom heading source, if any. Called when a path starts. */
+    public void resetHeading() {
+        if (headingSource != null) {
+            headingSource.reset();
+        }
+    }
+
+    /**
+     * Target heading (radians) at parameter t for the built-in rules.
+     *
+     * A CUSTOM source cannot be evaluated from t alone, so this falls back to
+     * the tangent for it -- use {@link #getHeadingTarget} for the real answer.
+     */
     public double getHeading(double t) {
         switch (headingMode) {
             case CONSTANT:
@@ -124,6 +222,7 @@ public class Path {
                 double delta = shortestAngle(endHeading - startHeading);
                 return startHeading + delta * clamp01(t);
             }
+            case CUSTOM:
             case TANGENT:
             default: {
                 Translation2d tan = getUnitTangent(t);

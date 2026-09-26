@@ -94,7 +94,9 @@ public class GoalSelectorTest {
         GoalSelector byTag = new GoalSelector(GoalSelector.Strategy.TAG_VISIBLE,
                 left(), right()).withSwitchFrames(0);
         // Robot sits closer to the LEFT goal, but only the RIGHT goal's tag is seen.
-        Pose2d nearLeft = new Pose2d(-50, 20, new Rotation2d(0));
+        // Both must be IN RANGE here, or the range filter decides the outcome and
+        // these cases stop testing tag preference at all.
+        Pose2d nearLeft = new Pose2d(-20, 20, new Rotation2d(0));
         pick = byTag.update(nearLeft, tags(21), Alliance.RED);
         check("Prefers the goal whose tag is in frame, over the nearer one",
                 pick.getName().equals("right"), pick.getName() + " / " + byTag.getReason());
@@ -108,14 +110,31 @@ public class GoalSelectorTest {
                 pick.getName().equals("right"), pick.getName());
 
         // No tags at all must fall back, not refuse: not seeing a tag usually just
-        // means the camera is pointed elsewhere.
+        // means the camera is pointed elsewhere. The fallback is geometry over every
+        // goal in range -- value first, distance only as the tie-break -- so from
+        // here it picks the 5-point goal even though the 2-point one is nearer.
         GoalSelector noTags = new GoalSelector(GoalSelector.Strategy.TAG_VISIBLE,
                 left(), right()).withSwitchFrames(0);
         pick = noTags.update(nearLeft, Collections.emptyList(), Alliance.RED);
-        check("With no tags in frame, falls back to nearest",
-                pick.getName().equals("left"),
+        check("With no tags in frame, falls back to geometry",
+                pick.getName().equals("right")
+                        && noTags.getReason().startsWith("no tags in frame"),
                 pick.getName() + " / " + noTags.getReason());
         System.out.printf("   fallback reason: %s%n", noTags.getReason());
+
+        // ... and when value cannot break the tie, distance does. Without this the
+        // case above would pass just as well for a selector that ignored distance
+        // entirely.
+        Goal nearTie = Goal.named("left", -40, 60).tags(11, 12).worth(2)
+                .map(LOW_MAP).build();
+        Goal farTie = Goal.named("right", 40, 60).tags(21, 22).worth(2)
+                .map(HIGH_MAP).radius(10.0).build();
+        GoalSelector tied = new GoalSelector(GoalSelector.Strategy.TAG_VISIBLE,
+                nearTie, farTie).withSwitchFrames(0);
+        pick = tied.update(nearLeft, Collections.emptyList(), Alliance.RED);
+        check("Equal-value goals fall back to the nearer one",
+                pick.getName().equals("left"),
+                pick.getName() + " / " + tied.getReason());
 
         System.out.println("\n=== HIDDEN_MEANS_AVAILABLE (inverted tag semantics) ===");
         GoalSelector inverted = new GoalSelector(GoalSelector.Strategy.TAG_VISIBLE,
@@ -229,6 +248,62 @@ public class GoalSelectorTest {
             emptySet = true;
         }
         check("A selector with no goals is rejected", emptySet, "accepted");
+
+        System.out.println("\n=== Range filtering breaks the tag lock-in ===");
+        // The failure this guards against: aiming at a goal points the camera AT
+        // that goal, so its tags are the ones in frame, so tag visibility keeps
+        // choosing it -- even after the robot has driven clean out of range while
+        // another goal sits comfortably shootable. Self-reinforcing.
+        GoalSelector lockIn = new GoalSelector(GoalSelector.Strategy.TAG_VISIBLE,
+                left(), right()).withSwitchFrames(0);
+        // Park far from LEFT (out of its map's range) and near RIGHT, but let only
+        // LEFT's tags be visible -- exactly the lock-in situation.
+        // Left ends up ~128 in away -- past MAX_SHOT_DISTANCE_IN and past the end of
+        // its own table -- while right is ~82 in, comfortably inside both.
+        Pose2d farFromLeft = new Pose2d(60, -20, new Rotation2d(0));
+        System.out.printf("   left is %.0f in away, right is %.0f in away, "
+                        + "only left's tags visible%n",
+                left().getAuthoredPosition().getDistance(farFromLeft.getTranslation()),
+                right().getAuthoredPosition().getDistance(farFromLeft.getTranslation()));
+        Goal escaped = lockIn.update(farFromLeft, tags(11), Alliance.RED);
+        System.out.printf("   picked %s (%s)%n", escaped.getName(), lockIn.getReason());
+        check("An out-of-range tagged goal does not win",
+                escaped.getName().equals("right"),
+                "locked onto a goal it cannot reach: " + lockIn.getReason());
+
+        // And when nothing at all is reachable it still aims at the nearest, so the
+        // robot is already pointed when it drives into range.
+        GoalSelector nothingClose = new GoalSelector(GoalSelector.Strategy.TAG_VISIBLE,
+                left(), right()).withSwitchFrames(0);
+        Goal aimAnyway = nothingClose.update(
+                new Pose2d(-72, -72, new Rotation2d(0)), tags(), Alliance.RED);
+        System.out.printf("   nothing in range -> %s (%s)%n",
+                aimAnyway.getName(), nothingClose.getReason());
+        check("With nothing in range it still aims at the nearest",
+                aimAnyway != null, "returned nothing");
+
+        System.out.println("\n=== Range uses the EFFECTIVE (moving) shot distance ===");
+        // The selector and the aiming solution must agree about reachability. They
+        // did not at first: the selector used the standing distance while the
+        // solution used the effective one, so driving away from a goal left the
+        // selector holding a goal the solution had already ruled out.
+        GoalSelector moving = new GoalSelector(GoalSelector.Strategy.BEST_VALUE,
+                left(), right()).withSwitchFrames(0);
+        Pose2d edge = new Pose2d(40, -30, new Rotation2d(0));
+        double standing = right().getAuthoredPosition()
+                .getDistance(edge.getTranslation());
+        double movingAway = org.firstinspires.ftc.teamcode.shooting.AimLogic
+                .effectiveDistanceTo(edge, new Translation2d(0, -60), 0.0,
+                        right().getAuthoredPosition(), right().getMap(),
+                        ShootingConstants.AIM_CONFIG);
+        System.out.printf("   standing %.1f in, driving away at 60 in/s -> %.1f in%n",
+                standing, movingAway);
+        check("Driving away from a goal increases its effective distance",
+                movingAway > standing + 1.0,
+                String.format("%.1f vs %.1f", movingAway, standing));
+        moving.update(edge, new Translation2d(0, -60), 0.0, tags(), Alliance.RED);
+        check("The selector accepts velocity for its range check",
+                moving.getSelected() != null, "null");
 
         System.out.println("\n=== Goals derived from AprilTag poses ===");
         java.util.Map<Integer, Pose2d> table = org.firstinspires.ftc.teamcode.shooting

@@ -497,6 +497,83 @@ public class MatchTest {
             sim.releaseClock();
         }
 
+        System.out.println("\n=== Scenario: autonomous that shoots on the move ===");
+        {
+            // The whole point of heading sources: follow a path AND track the goal.
+            Pose2d truth = new Pose2d(-40, -20, Rotation2d.fromDegrees(60));
+            MatchSim sim = new MatchSim(truth, buildGoals());
+            sim.seedOdometry(truth);
+
+            CommandScheduler scheduler = new CommandScheduler();
+            scheduler.registerSubsystem(sim.drive, sim.shooter);
+
+            final int[] markerFires = {0};
+            org.firstinspires.ftc.teamcode.shooting.AimAtGoalHeading aim =
+                    new org.firstinspires.ftc.teamcode.shooting.AimAtGoalHeading(
+                            sim.goalSelector, () -> Alliance.RED,
+                            sim.localization::getVisibleTagIds);
+
+            org.firstinspires.ftc.teamcode.pathing.Path leg =
+                    new org.firstinspires.ftc.teamcode.pathing.Path(
+                            new org.firstinspires.ftc.teamcode.pathing.BezierCurve(
+                                    new Translation2d(-40, -20),
+                                    new Translation2d(-14, 4),
+                                    new Translation2d(14, 6),
+                                    new Translation2d(34, -6)))
+                            .setHeadingSource(aim)
+                            .addMarker(org.firstinspires.ftc.teamcode.pathing.PathMarker
+                                    .atT(0.25, () -> markerFires[0]++, "test marker"));
+
+            org.firstinspires.ftc.teamcode.commands.FollowPathAndShootCommand routine =
+                    new org.firstinspires.ftc.teamcode.commands.FollowPathAndShootCommand(
+                            sim.drive, sim.shooter,
+                            new org.firstinspires.ftc.teamcode.pathing.PathChain(leg), aim);
+            scheduler.schedule(routine);
+
+            int loops = 0;
+            int fed = 0;
+            int aimedLoops = 0;
+            double worstAimErrorAtFire = 0;
+            double travelled = 0;
+            Translation2d prev = sim.truePose.getTranslation();
+            while (scheduler.isScheduled(routine) && loops < 1500) {
+                sim.tick(Alliance.RED);
+                scheduler.run();
+                loops++;
+                travelled += sim.truePose.getTranslation().getDistance(prev);
+                prev = sim.truePose.getTranslation();
+                AimSolution s = aim.getLastSolution();
+                if (s != null) {
+                    aimedLoops++;
+                    if (sim.feeder.power > 0.5) {
+                        fed++;
+                        worstAimErrorAtFire = Math.max(worstAimErrorAtFire,
+                                Math.toDegrees(Math.abs(s.headingErrorFrom(
+                                        sim.localization.getPose().getHeading()))));
+                    }
+                }
+            }
+            System.out.printf("   %d loops (%.1f s), travelled %.0f in, "
+                            + "aim solved on %d loops, fed %d%n",
+                    loops, loops * MatchSim.DT, travelled, aimedLoops, fed);
+            System.out.printf("   ended (%.1f, %.1f), worst aim error at fire %.2f deg%n",
+                    sim.truePose.getX(), sim.truePose.getY(), worstAimErrorAtFire);
+
+            check("the path actually ran to completion",
+                    !scheduler.isScheduled(routine) && travelled > 40,
+                    String.format("travelled %.0f in in %d loops", travelled, loops));
+            check("the aiming heading source drove the heading", aimedLoops > 0,
+                    "no solution was ever produced");
+            check("it shot while following the path", fed > 0,
+                    "never fired while pathing -- aim and path are still fighting");
+            check("never fired outside its aim tolerance", worstAimErrorAtFire < 20.0,
+                    String.format("fired %.1f deg off", worstAimErrorAtFire));
+            check("the mid-path marker fired exactly once", markerFires[0] == 1,
+                    markerFires[0] + " fires");
+            scheduler.reset();
+            sim.releaseClock();
+        }
+
         System.out.println(fails == 0
                 ? String.format("%nBoth matches completed cleanly.%s",
                         warnings > 0 ? " (" + warnings + " warning(s))" : "")

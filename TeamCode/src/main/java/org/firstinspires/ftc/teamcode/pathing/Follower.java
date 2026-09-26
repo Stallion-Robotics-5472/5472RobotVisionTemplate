@@ -28,6 +28,7 @@ public class Follower {
     private final PIDFController drivePID;
     private final PIDFController headingPID;
 
+    private boolean updatesLocalizer = true;
     private PathChain currentChain = null;
     private int pathIndex = 0;
     private double closestT = 0.0;
@@ -37,11 +38,14 @@ public class Follower {
     private Pose2d lastPose = null;
     private double lastTimeSeconds = Double.NaN;
     private double speed = 0.0;
+    private Translation2d estimatedFieldVelocity = new Translation2d();
+    private double estimatedOmega = 0.0;
 
     // Diagnostics from the most recent update.
     private double lastCrossTrackError = 0.0;
     private double lastHeadingError = 0.0;
     private double lastRemainingLength = 0.0;
+    private int markersFiredLastLoop = 0;
 
     public Follower(Localizer localizer, Drivetrain drivetrain) {
         this.localizer = localizer;
@@ -55,6 +59,20 @@ public class Follower {
                 PathConstants.HEADING_kD, PathConstants.HEADING_kF);
     }
 
+    /**
+     * Whether this follower advances the pose estimate itself.
+     *
+     * True (the default) suits a plain OpMode that owns nothing else. Set it FALSE
+     * when a subsystem already updates localization each loop -- DriveSubsystem
+     * does, in periodic(). Updating twice in one loop feeds the estimator two
+     * samples microseconds apart with no movement between them, which drags the
+     * filtered velocity toward zero. That would quietly break shoot-on-the-move,
+     * since the whole correction is proportional to velocity.
+     */
+    public void setUpdatesLocalizer(boolean updatesLocalizer) {
+        this.updatesLocalizer = updatesLocalizer;
+    }
+
     /** Begins following the given chain from its start. */
     public void followPath(PathChain chain) {
         this.currentChain = chain;
@@ -64,6 +82,12 @@ public class Follower {
         translationalPID.reset();
         drivePID.reset();
         headingPID.reset();
+        if (chain != null) {
+            for (int i = 0; i < chain.size(); i++) {
+                chain.get(i).resetHeading();
+                chain.get(i).rearmMarkers();
+            }
+        }
         lastPose = null;
         lastTimeSeconds = Double.NaN;
     }
@@ -83,7 +107,9 @@ public class Follower {
      * and testable.
      */
     public boolean update(double currentTimeSeconds) {
-        localizer.update();
+        if (updatesLocalizer) {
+            localizer.update();
+        }
         Pose2d pose = localizer.getPose();
 
         double dt = 0.0;
@@ -94,6 +120,9 @@ public class Follower {
             double dx = pose.getX() - lastPose.getX();
             double dy = pose.getY() - lastPose.getY();
             speed = Math.hypot(dx, dy) / dt;
+            estimatedFieldVelocity = new Translation2d(dx / dt, dy / dt);
+            estimatedOmega = Path.shortestAngle(
+                    pose.getHeading() - lastPose.getHeading()) / dt;
         }
         lastPose = pose;
         lastTimeSeconds = currentTimeSeconds;
@@ -110,7 +139,9 @@ public class Follower {
         Translation2d closest = path.getPoint(closestT);
         Translation2d tangent = path.getUnitTangent(closestT);
         double curvature = path.getCurvature(closestT);
-        double targetHeading = path.getHeading(closestT);
+        HeadingSource.Target headingTarget = path.getHeadingTarget(
+                closestT, pose, localizerFieldVelocity(), localizerOmega());
+        double targetHeading = headingTarget.headingRadians;
         double remaining = path.getRemainingLength(closestT);
 
         // --- translational correction (toward closest point) ---
@@ -149,10 +180,19 @@ public class Follower {
 
         // --- heading control ---
         double headingError = Path.shortestAngle(targetHeading - pose.getHeading());
+        // The feedforward is what lets a sweeping target (aiming at a goal while
+        // translating past it) be tracked rather than trailed.
         double turn = clamp(PathConstants.HEADING_CORRECTION_SIGN
-                * headingPID.calculate(headingError, dt), -1.0, 1.0);
+                        * headingPID.calculate(headingError, dt)
+                        + headingTarget.omegaFeedforwardRadPerSec
+                                * PathConstants.TURN_POWER_PER_RAD_PER_SEC,
+                -1.0, 1.0);
 
         drivetrain.driveFieldCentric(fieldVec.getX(), fieldVec.getY(), turn, pose.getRotation());
+
+        // Markers fire after the drive command is issued, so an action that sets a
+        // setpoint takes effect on the next loop rather than fighting this one.
+        markersFiredLastLoop = path.pollMarkers(closestT, remaining);
 
         lastCrossTrackError = crossTrack;
         lastHeadingError = headingError;
@@ -206,6 +246,39 @@ public class Follower {
 
     public double getClosestT() {
         return closestT;
+    }
+
+    /** How many markers fired on the most recent update, for telemetry. */
+    public int getMarkersFiredLastLoop() {
+        return markersFiredLastLoop;
+    }
+
+    /**
+     * Field velocity for a custom heading source. Taken from the Localizer when it
+     * can supply one, else finite-differenced from the pose here.
+     */
+    private Translation2d localizerFieldVelocity() {
+        if (localizer instanceof VelocityAware) {
+            return ((VelocityAware) localizer).getFieldVelocity();
+        }
+        return estimatedFieldVelocity;
+    }
+
+    private double localizerOmega() {
+        if (localizer instanceof VelocityAware) {
+            return ((VelocityAware) localizer).getAngularVelocity();
+        }
+        return estimatedOmega;
+    }
+
+    /**
+     * Implemented by a Localizer that already estimates velocity, so a heading
+     * source gets the filtered value rather than a second, noisier derivative.
+     */
+    public interface VelocityAware {
+        Translation2d getFieldVelocity();
+
+        double getAngularVelocity();
     }
 
     // ----- helpers -----

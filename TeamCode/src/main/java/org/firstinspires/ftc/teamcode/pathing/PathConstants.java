@@ -50,6 +50,22 @@ public final class PathConstants {
     public static final double DRIVE_kD = 0.010;
     public static final double DRIVE_kF = 0.0;
 
+    /**
+     * Heading controller.
+     *
+     * kP dominates how fast the robot can track a MOVING heading, which matters
+     * whenever a path aims at a goal (see AimAtGoalHeading). Measured in the offline
+     * match simulation on a leg that has to slew ~30 degrees while driving:
+     *
+     *   kP 0.30 -> 156 loops spent turning, 59 spent able to shoot
+     *   kP 0.60 ->  97                      56
+     *   kP 1.00 ->  55                      77
+     *
+     * 0.30 below is a deliberately conservative starting point for a robot nobody
+     * has tuned yet. If the robot trails a moving aim, raise kP before reaching for
+     * anything else -- it is the dominant term by a wide margin. Raise kD alongside
+     * it to stop the overshoot that follows.
+     */
     // ----- Heading controller: holds the target heading (per radian) -----
     public static final double HEADING_kP = 0.30;
     public static final double HEADING_kI = 0.0;
@@ -70,6 +86,25 @@ public final class PathConstants {
      * because a mis-wired drivetrain is the far more likely cause.
      */
     public static final double HEADING_CORRECTION_SIGN = 1.0;
+
+    /**
+     * Converts an angular feedforward (rad/sec) into turn power.
+     *
+     * Set it to 1 / (the robot's turn rate at full turn power, in rad/sec): if the
+     * robot spins about 6 rad/sec flat out, this is 1/6 = 0.167. The
+     * "Drivetrain Characterization" OpMode measures it for you.
+     *
+     * Used by both the path follower and DriveSubsystem's heading lock, so a
+     * feedforward means the same thing whichever is steering.
+     */
+    public static final double TURN_POWER_PER_RAD_PER_SEC = 0.167;
+
+    /**
+     * Ceiling on the turn command while a heading is being held. Leaving headroom
+     * below 1.0 keeps part of the power budget for translation, so locking onto a
+     * target does not stop the robot moving.
+     */
+    public static final double MAX_HEADING_LOCK_TURN = 0.8;
 
     /**
      * Centripetal scaling. The centripetal correction magnitude is

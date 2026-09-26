@@ -72,6 +72,8 @@ public class GoalSelector {
     private Goal challenger;
     private int challengerStreak = 0;
     private boolean frozen = false;
+    private Translation2d lastFieldVelocity = new Translation2d();
+    private double lastOmega = 0.0;
     private String lastReason = "initial";
 
     public GoalSelector(Strategy strategy, Goal... goals) {
@@ -168,9 +170,27 @@ public class GoalSelector {
      * @return the selected goal.
      */
     public Goal update(Pose2d robotPose, Iterable<Integer> visibleTagIds, Alliance alliance) {
+        return update(robotPose, new Translation2d(), 0.0, visibleTagIds, alliance);
+    }
+
+    /**
+     * Re-evaluates the selection, accounting for the robot's motion.
+     *
+     * Prefer this overload. Range checks then use the same effective distance the
+     * aiming solution uses, so the selector cannot keep a goal the solution has
+     * already ruled out -- see {@link AimLogic#effectiveDistanceTo}.
+     *
+     * @param fieldVelocity field-frame velocity, inches/sec.
+     * @param omegaRadPerSec angular velocity, radians/sec CCW.
+     */
+    public Goal update(Pose2d robotPose, Translation2d fieldVelocity, double omegaRadPerSec,
+                       Iterable<Integer> visibleTagIds, Alliance alliance) {
         if (frozen || strategy == Strategy.FIXED || goals.size() == 1) {
             return selected;
         }
+
+        this.lastFieldVelocity = fieldVelocity;
+        this.lastOmega = omegaRadPerSec;
 
         Goal best = evaluate(robotPose, visibleTagIds, alliance);
         if (best == selected) {
@@ -206,25 +226,40 @@ public class GoalSelector {
 
             case TAG_VISIBLE: {
                 List<Goal> available = availableByTag(visibleTagIds);
-                if (available.isEmpty()) {
-                    lastReason = "no goal's tags in frame - nearest";
-                    return nearest(robotPose, alliance, goals);
+
+                // A goal you cannot reach must never win, whatever the camera sees.
+                //
+                // This is not a detail. Aiming at a goal points the camera AT that
+                // goal, so its tags are the ones in frame, so tag visibility keeps
+                // choosing it -- a self-reinforcing lock-in that survives the robot
+                // driving clean out of range while another goal sits comfortably
+                // shootable. Filtering by range first breaks the loop.
+                List<Goal> reachable = inRange(available, robotPose, alliance);
+                if (!reachable.isEmpty()) {
+                    lastReason = tagMeaning == TagMeaning.VISIBLE_MEANS_AVAILABLE
+                            ? "tags in frame, in range" : "tags hidden, in range";
+                    return bestValueThenNearest(robotPose, alliance, reachable);
                 }
-                lastReason = tagMeaning == TagMeaning.VISIBLE_MEANS_AVAILABLE
-                        ? "tags in frame" : "tags hidden (== available)";
-                return bestValueThenNearest(robotPose, alliance, available);
+
+                // Nothing the camera can see is reachable. Fall back to geometry
+                // over ALL goals -- including ones we are not currently looking at,
+                // which is the whole point.
+                List<Goal> anyReachable = inRange(goals, robotPose, alliance);
+                if (!anyReachable.isEmpty()) {
+                    lastReason = available.isEmpty()
+                            ? "no tags in frame - nearest in range"
+                            : "tagged goal out of range - nearest in range";
+                    return bestValueThenNearest(robotPose, alliance, anyReachable);
+                }
+
+                // Nothing is reachable at all. Point at the closest thing so the
+                // robot is already aimed by the time it drives into range.
+                lastReason = "nothing in range - nearest";
+                return nearest(robotPose, alliance, goals);
             }
 
             case BEST_VALUE: {
-                List<Goal> reachable = new ArrayList<>();
-                for (Goal goal : goals) {
-                    double distance = distanceTo(goal, robotPose, alliance);
-                    if (goal.getMap().covers(distance)
-                            && distance >= ShootingConstants.MIN_SHOT_DISTANCE_IN
-                            && distance <= ShootingConstants.MAX_SHOT_DISTANCE_IN) {
-                        reachable.add(goal);
-                    }
-                }
+                List<Goal> reachable = inRange(goals, robotPose, alliance);
                 if (reachable.isEmpty()) {
                     lastReason = "nothing in range - nearest";
                     return nearest(robotPose, alliance, goals);
@@ -237,6 +272,23 @@ public class GoalSelector {
             default:
                 return selected;
         }
+    }
+
+    /**
+     * The subset of {@code candidates} the robot could actually shoot at from here:
+     * inside the configured shot range AND inside that goal's own measured table.
+     */
+    private List<Goal> inRange(List<Goal> candidates, Pose2d pose, Alliance alliance) {
+        List<Goal> result = new ArrayList<>();
+        for (Goal goal : candidates) {
+            double distance = shotDistanceTo(goal, pose, alliance);
+            if (goal.getMap().covers(distance)
+                    && distance >= ShootingConstants.MIN_SHOT_DISTANCE_IN
+                    && distance <= ShootingConstants.MAX_SHOT_DISTANCE_IN) {
+                result.add(goal);
+            }
+        }
+        return result;
     }
 
     /** Goals the tag picture says are available, per {@link TagMeaning}. */
@@ -295,9 +347,21 @@ public class GoalSelector {
         return best;
     }
 
+    /** Straight-line distance, for ranking goals by proximity. */
     private double distanceTo(Goal goal, Pose2d pose, Alliance alliance) {
         return AimLogic.shooterDistanceTo(
                 pose, positionFor(goal, alliance), ShootingConstants.AIM_CONFIG);
+    }
+
+    /**
+     * The distance a shot at this goal would actually have to cover, given the
+     * robot's current motion. This is the figure the range check must use so the
+     * selector agrees with the aiming solution.
+     */
+    private double shotDistanceTo(Goal goal, Pose2d pose, Alliance alliance) {
+        return AimLogic.effectiveDistanceTo(pose, lastFieldVelocity, lastOmega,
+                positionFor(goal, alliance), goal.getMap(),
+                ShootingConstants.AIM_CONFIG.withGoalRadius(goal.getRadiusInches()));
     }
 
     // ---------------------------------------------------------------------

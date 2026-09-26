@@ -112,7 +112,8 @@ public class AimAndShootCommand extends Command {
         // identify by their AprilTags, and will not switch on a single flickering
         // frame -- on a turretless robot a switch moves the whole chassis.
         targetGoal = goalSelector.update(
-                drive.getPose(), drive.getLocalization().getVisibleTagIds(), playing);
+                drive.getPose(), drive.getFieldVelocity(), drive.getAngularVelocity(),
+                drive.getLocalization().getVisibleTagIds(), playing);
         Translation2d goal = GoalSelector.positionFor(targetGoal, playing);
 
         solution = AimLogic.calculate(

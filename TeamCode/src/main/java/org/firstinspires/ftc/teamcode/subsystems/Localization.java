@@ -42,12 +42,13 @@ import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose3d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Translation2d;
 import org.firstinspires.ftc.teamcode.lib.util.RobotClock;
+import org.firstinspires.ftc.teamcode.pathing.Follower;
 import org.firstinspires.ftc.teamcode.pathing.Localizer;
 
 import java.util.Collections;
 import java.util.List;
 
-public class Localization implements Localizer {
+public class Localization implements Localizer, Follower.VelocityAware {
     private final PinpointOdometry odometry;
     /** Null when vision is disabled at construction (odometry-only mode). */
     private final LimelightVision vision;

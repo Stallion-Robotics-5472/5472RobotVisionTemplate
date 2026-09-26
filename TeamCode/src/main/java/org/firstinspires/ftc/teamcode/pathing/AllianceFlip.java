@@ -112,6 +112,12 @@ public final class AllianceFlip {
                 flipped.setLinearHeading(sym.heading(path.getStartHeading()),
                         sym.heading(path.getEndHeading()));
                 break;
+            case CUSTOM:
+                // A custom source cannot be transformed -- we do not know what it
+                // means. Carry it across and let it handle the alliance itself.
+                // AimAtGoalHeading does, via its GoalSelector.
+                flipped.setHeadingSource(path.getHeadingSource());
+                break;
             case TANGENT:
             default:
                 // The tangent follows the transformed control points, so only
@@ -122,6 +128,15 @@ public final class AllianceFlip {
                     flipped.setTangentHeading();
                 }
                 break;
+        }
+        // Markers are positions along the path, not field coordinates, so they
+        // carry across a flip unchanged.
+        for (PathMarker marker : path.getMarkers()) {
+            flipped.addMarker(marker.getTrigger() == PathMarker.Trigger.AT_T
+                    ? PathMarker.atT(marker.getThreshold(), marker.getAction(),
+                            marker.getName())
+                    : PathMarker.withinInchesOfEnd(marker.getThreshold(),
+                            marker.getAction(), marker.getName()));
         }
         return flipped;
     }

@@ -188,6 +188,25 @@ public final class AimLogic {
     }
 
     /**
+     * The distance a shot would actually have to cover, given the robot's motion --
+     * the converged virtual-goal distance, without computing a feedforward.
+     *
+     * Goal selection needs this per candidate every loop. Using the straight-line
+     * distance there instead would let the selector and the aiming solution
+     * disagree about whether a goal is reachable: driving away from a goal makes
+     * the effective distance larger than the standing one, so the selector would
+     * keep a goal the solution has already declared out of range.
+     */
+    public static double effectiveDistanceTo(Pose2d robotPose, Translation2d fieldVelocity,
+                                             double omegaRadPerSec, Translation2d goal,
+                                             ShooterMap map, Config config) {
+        Pose2d aimPose = advance(robotPose, fieldVelocity, omegaRadPerSec,
+                config.phaseDelaySeconds);
+        return solve(aimPose, fieldVelocity, omegaRadPerSec, goal, map, config)
+                .effectiveDistance;
+    }
+
+    /**
      * Straight-line distance from the shooter to a field point, ignoring motion.
      * Use this while building the shot map: it is the distance you are actually
      * measuring when you take a standing shot.

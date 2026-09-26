@@ -32,21 +32,6 @@ import org.firstinspires.ftc.teamcode.shooting.AimLogic;
 
 public class DriveSubsystem extends SubsystemBase {
 
-    /**
-     * Ceiling on the heading-lock turn command. Leaving headroom below 1.0 keeps
-     * some of the power budget for translation, so locking onto a target does not
-     * stop the driver moving.
-     */
-    private static final double MAX_HEADING_LOCK_TURN = 0.8;
-
-    /**
-     * Converts the feedforward (rad/s) into turn power. Set it to
-     * 1 / (turn rate at full power, rad/s): if the robot spins about 6 rad/s flat
-     * out, this is 1/6 = 0.167. Measure it with the Drivetrain Direction Check
-     * OpMode, or tune by eye until a moving lock stops trailing.
-     */
-    private static final double TURN_POWER_PER_RAD_PER_SEC = 0.167;
-
     private final MecanumDrivetrain drivetrain;
     private final Localization localization;
     private final PIDFController headingController;
@@ -121,8 +106,9 @@ public class DriveSubsystem extends SubsystemBase {
         double error = AimLogic.wrapRadians(targetHeadingRad - getPose().getHeading());
         double pid = headingController.calculate(error, dt);
         double turn = PathConstants.HEADING_CORRECTION_SIGN * pid
-                + feedforwardRadPerSec * TURN_POWER_PER_RAD_PER_SEC;
-        turn = Math.max(-MAX_HEADING_LOCK_TURN, Math.min(MAX_HEADING_LOCK_TURN, turn));
+                + feedforwardRadPerSec * PathConstants.TURN_POWER_PER_RAD_PER_SEC;
+        turn = Math.max(-PathConstants.MAX_HEADING_LOCK_TURN,
+                Math.min(PathConstants.MAX_HEADING_LOCK_TURN, turn));
 
         lastHeadingTargetRad = targetHeadingRad;
         lastHeadingErrorRad = error;
