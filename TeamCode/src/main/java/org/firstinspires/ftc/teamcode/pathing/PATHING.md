@@ -77,8 +77,83 @@ drivetrain is far more often the cause.
 - `setReverseTangentHeading()` — face backward along the path (drive in reverse).
 - `setLinearHeading(start, end)` — interpolate by t, shortest angular route.
 - `setConstantHeading(h)` — hold a fixed heading.
+- `setHeadingSource(source)` — hand heading to a `HeadingSource`, below.
+
+### Heading sources: aiming while pathing
+
+The four modes above are functions of `t` alone — where you are along the path is
+all they need. "Keep pointing at the goal" is not: it depends on where the robot
+actually is, how fast it is moving, and it wants an angular feedforward as well as
+a target angle. So heading is an interface.
+
+```java
+public interface HeadingSource {
+    Target compute(double t, Pose2d pose, Translation2d fieldVelocity,
+                   double omegaRadPerSec);
+    default void reset() {}
+}
+```
+
+`Target` carries a heading and `omegaFeedforwardRadPerSec` — how fast the target
+heading is itself sweeping. Zero for anything fixed in the field frame. Non-zero
+when the target moves on its own, which is the case that matters: a position-only
+controller permanently trails a sweeping target, and a chassis is slow to rotate.
+The follower adds it as `omega × TURN_POWER_PER_RAD_PER_SEC`.
+
+`AimAtGoalHeading` is the implementation that matters:
+
+```java
+AimAtGoalHeading aim = new AimAtGoalHeading(
+        ShootingConstants.newGoalSelector(),
+        () -> alliance,
+        drive.getLocalization()::getVisibleTagIds);
+
+Path shootWhileCrossing = new Path(curve).setHeadingSource(aim);
+```
+
+It computes the full aiming solution once per loop and caches it, so the command
+driving the shooter reads back `aim.getLastSolution()` — the same solution the
+heading came from — rather than solving it a second time and possibly disagreeing
+with itself.
+
+**Why this had to be an interface rather than another enum case.** Before it
+existed, "drive this route while tracking the goal" was impossible, and not because
+of a missing feature: the follower took heading from the path and the aiming
+command took heading from the shot solution, and both of them required the
+drivetrain. The scheduler therefore ran exactly one of them. One command that owns
+the drivetrain and takes its heading from a pluggable source is the fix.
+
+`AllianceFlip` carries a `CUSTOM` heading source across a mirrored path untouched,
+because the goal selector already flips the goal itself at run time.
+
+### Path markers: doing something mid-path
+
+A marker fires a callback once, partway along a path:
+
+```java
+Path leg = new Path(curve)
+        .setTangentHeading()
+        .addMarker(PathMarker.atT(0.33, () -> shooter.setFlywheelRpm(3200), "spin up"))
+        .addMarker(PathMarker.withinInchesOfEnd(18.0, shooter::stow, "stow"));
+```
+
+`atT(t, action)` fires when the path parameter passes `t`;
+`withinInchesOfEnd(inches, action)` fires when the remaining arc length drops
+below `inches`. Each fires at most once per run of the path and re-arms when the
+path is started again.
+
+This is not cosmetic. A flywheel takes over a second to spin up (the flywheel test
+in **Drivetrain Characterization** measures yours), so a shooting leg that starts
+the wheel when it begins has already wasted the leg. `ShootOnTheMoveAuto` starts
+it a third of the way along the *previous* leg instead, and the shot window opens
+with the wheel already at speed.
+
+Markers are polled after the drive command each loop, and
+`follower.getMarkersFiredLastLoop()` reports what fired, for telemetry.
 
 ## Tuning
+
+
 
 All gains and tolerances are in `PathConstants`: the translational, drive, and
 heading PIDF gains, the centripetal scale, and the completion/advancement
@@ -104,11 +179,14 @@ driveMag    = max(targetSpeed / MAX_ROBOT_SPEED, drivePIDOut)
 ```
 
 This naturally decelerates the robot to zero at the path end without requiring an
-aggressive `DRIVE_kD`. To measure `ZERO_POWER_DECEL_RATE`: drive the robot at
-full speed, cut motor power, measure stopping distance `d` and entry speed `v`,
-then `decelRate = v² / (2·d)`. Increase it if the robot overshoots endpoints;
-decrease it if braking starts too far out. `MAX_ROBOT_SPEED` is the top speed at
-full drive PID output (inches/sec); it normalizes the feedforward to `[0, 1]`.
+aggressive `DRIVE_kD`.
+
+Do not guess either constant. Run the **Drivetrain Characterization** OpMode
+(group `Setup`): it accelerates to a plateau, cuts power, and reports
+`MAX_ROBOT_SPEED` and `ZERO_POWER_DECEL_RATE = v² / (2·d)` from the same run, so
+the deceleration is measured from the speed the robot actually reached. Full
+procedure in `MANUAL.md` §8a. After that, increase the deceleration rate if the
+robot overshoots endpoints and decrease it if braking starts too far out.
 
 Both constants can also be edited in the **Gains** tab of the Path Planner and
 pasted back into `PathConstants.java` via the generated snippet.

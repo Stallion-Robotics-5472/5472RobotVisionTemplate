@@ -303,6 +303,55 @@ seeded pose — as it must, since there is nothing else to go on.
 
 ---
 
+## Shooting on the move in autonomous
+
+TeleOp gets the driver to supply translation while the command owns heading. In
+autonomous there is no driver, so a *path* supplies translation instead — and the
+aiming solution still owns heading. `FollowPathAndShootCommand` is that pairing:
+
+```java
+AimAtGoalHeading aim = new AimAtGoalHeading(
+        ShootingConstants.newGoalSelector(),
+        () -> alliance,
+        drive.getLocalization()::getVisibleTagIds);
+
+PathChain plan = new PathChain(
+        new Path(leaveStart).setTangentHeading()
+                .addMarker(PathMarker.atT(0.33, () -> shooter.setFlywheelRpm(3200))),
+        new Path(crossField).setHeadingSource(aim),      // the shooting leg
+        new Path(park).setTangentHeading()
+                .addMarker(PathMarker.withinInchesOfEnd(18.0, shooter::stow)));
+
+schedule(new FollowPathAndShootCommand(drive, shooter, plan, aim));
+```
+
+`ShootOnTheMoveAuto` (group `Auto`) is that routine, authored for red and flipped
+to blue at init. Its shape is worth copying: a first leg that gets out of the start
+on a plain tangent heading and starts the flywheel partway along, a middle leg that
+hands heading to the aiming solution and shoots without stopping, and a park leg
+that stows on arrival.
+
+The gates are the same four as TeleOp — in range, aimed, at speed, pose trusted —
+so an autonomous will no more fire on an untrusted pose than a TeleOp will.
+`getStatus()` gives the same one-line reason.
+
+Two details that are easy to get wrong and are already handled:
+
+- **The solution is computed once.** `AimAtGoalHeading` caches it; the command
+  reads `aim.getLastSolution()` back after `follower.update()`. Solving it twice —
+  once for heading, once for the shooter — invites the two to disagree, and the
+  robot then spins up for a shot it is not actually aiming.
+- **The follower does not advance the pose estimate.** `DriveSubsystem.periodic()`
+  already does. Letting both do it feeds the estimator two samples microseconds
+  apart with no movement between them, which drags the filtered velocity toward
+  zero — and the entire moving-shot correction scales with velocity. The command
+  calls `follower.setUpdatesLocalizer(false)` for exactly this reason.
+
+See [`../pathing/PATHING.md`](../pathing/PATHING.md#heading-sources-aiming-while-pathing)
+for heading sources and markers.
+
+---
+
 ## Choosing which goal to shoot at
 
 BIOBUZZ scores on **hives and flowers**, so there is more than one thing to shoot
