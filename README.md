@@ -614,8 +614,10 @@ All paths relative to `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/`.
 | OpMode | Group | Purpose |
 |---|---|---|
 | **Drivetrain Direction Check** | `Setup` | **Run first.** Confirms forward / strafe / turn conventions and each wheel. |
+| **Drivetrain Characterization** | `Setup` | Measures `MAX_ROBOT_SPEED`, `ZERO_POWER_DECEL_RATE`, `TURN_POWER_PER_RAD_PER_SEC`, the stiction floor and flywheel spin-up. Prints them pasteable. |
 | **Shooter Map Tuning** | `Setup` | Build the shot table: auto-aims so the distance is honest, bypasses the map, logs pasteable rows. |
 | **Shoot On The Move** | `Drive` | Command-based TeleOp. Drive and shoot without stopping. |
+| **Shoot On The Move Auto** | `Auto` | Drives a route while tracking the goal and shooting, either alliance. |
 | Localization Test | `Vision` | Streams fused vs. raw odometry vs. raw vision. The tuning and diagnosis tool. |
 | Robot-Centric Mecanum Drive | `Drive` | Plain TeleOp; drives relative to the robot's own front. |
 | Field-Centric Mecanum Drive | `Drive` | TeleOp relative to the driver's point of view, with alliance select. |

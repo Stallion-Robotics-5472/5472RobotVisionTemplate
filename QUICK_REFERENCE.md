@@ -24,8 +24,10 @@ Heading `0` faces +X. `90°` faces +Y.
 | OpMode | Group | Use it to |
 |---|---|---|
 | **Drivetrain Direction Check** | `Setup` | **Run first.** Verify forward / strafe / turn and each wheel |
+| **Drivetrain Characterization** | `Setup` | Measure speed, braking, turn feedforward, stiction, spin-up |
 | **Shooter Map Tuning** | `Setup` | Build the shot table; auto-aims, bypasses the map, logs rows |
 | **Shoot On The Move** | `Drive` | Command-based TeleOp; drive and shoot without stopping |
+| **Shoot On The Move Auto** | `Auto` | Drive a route while tracking the goal and shooting |
 | Localization Test | `Vision` | Watch fused vs. odometry vs. vision; diagnose everything |
 | Robot-Centric Mecanum Drive | `Drive` | Drive relative to the robot's own front |
 | Field-Centric Mecanum Drive | `Drive` | Drive relative to the driver, with alliance select |
@@ -57,6 +59,17 @@ Heading `0` faces +X. `90°` faces +Y.
 | `X` / `B` | rotate CCW (left) / CW (right) |
 | `A` / `Y` | front-left / front-right wheel alone rolls forward |
 | `left` / `right bumper` | back-left / back-right wheel alone rolls forward |
+
+**Drivetrain Characterization** — press once; the robot drives itself:
+
+| Control | Test | Gives you |
+|---|---|---|
+| `dpad up` | straight line (needs ~10 ft) | `MAX_ROBOT_SPEED`, `ZERO_POWER_DECEL_RATE` |
+| `dpad right` | spin in place | `TURN_POWER_PER_RAD_PER_SEC` |
+| `dpad left` | ramp turn power up | smallest turn power that moves it |
+| `Y` | flywheel from a stop | spin-up time; is the top of the table real |
+| `A` | *(hold)* show pasteable constants | |
+| `B` / `back` | clear results / abort a running test | |
 
 ---
 

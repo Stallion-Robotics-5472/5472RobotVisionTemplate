@@ -13,4 +13,5 @@ public abstract class LinearOpMode {
     public boolean opModeInInit() { return false; }
     public boolean isStopRequested() { return false; }
     public void sleep(long ms) {}
+    public void idle() {}
 }

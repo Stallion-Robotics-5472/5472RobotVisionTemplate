@@ -251,18 +251,86 @@ you, the heading is 180° off — press `Y` with a tag in view, or fix `START_PO
 Everything here is in `PathConstants`. Tune in this order; each step assumes the
 ones before it are done.
 
-### a. Measure the deceleration rate
+### a. Characterize the drivetrain
 
-Not a guess — measure it. Drive at full speed, cut power, and record the entry
-speed `v` and stopping distance `d`:
+Four constants in `PathConstants` describe your robot's physics rather than your
+taste, so they are measured, not tuned: guessing them and then tuning the PIDs
+around the guess is how a robot ends up with a kD of 4 and a mystery wobble.
 
-```
-ZERO_POWER_DECEL_RATE = v² / (2·d)
-```
+| Constant | What it is | What it breaks when wrong |
+|---|---|---|
+| `MAX_ROBOT_SPEED` | top speed, in/s | normalizes the braking feedforward; too low and the robot never commits to full speed |
+| `ZERO_POWER_DECEL_RATE` | coast deceleration, in/s² | too low → overshoots path endpoints; too high → brakes metres early |
+| `TURN_POWER_PER_RAD_PER_SEC` | turn power per rad/s | the aiming feedforward; too low and the robot permanently trails a moving target |
+| `MAX_HEADING_LOCK_TURN` | turn-power ceiling while aiming | a budget, not a measurement — see below |
 
-Set `MAX_ROBOT_SPEED` to the top speed you actually reach, in inches/second.
-Both feed the deceleration feedforward that brings the robot to a stop at the
-path end.
+Run **Drivetrain Characterization** (TeleOp, group `Setup`). It drives the robot
+itself and prints each result ready to paste. Nothing is written to disk: you read
+the numbers and edit `PathConstants` by hand, so a bad run cannot silently poison
+your constants.
+
+**Before you run it**
+
+- Run [§4](#4-check-the-drivetrain-before-anything-else) first. Every test here
+  assumes forward is forward and turn is CCW. On a mis-wired drivetrain the
+  numbers come out confident and meaningless.
+- Clear about **10 feet ahead** of the robot and 2 feet either side.
+- Use the **surface you compete on**. Carpet and tile give genuinely different
+  deceleration; a number measured on the shop floor is a number for the shop floor.
+- Start on a **freshly charged battery**, and note the voltage the OpMode shows.
+  All four numbers move with voltage. If you characterize at 13.2 V and play a
+  match at 11.8 V, the robot will brake later than the constants expect.
+- Take anything off the robot that can fall off under full-power acceleration.
+
+**The tests**
+
+| Press | Test | What it does | What you get |
+|---|---|---|---|
+| dpad ↑ | straight line | accelerates at full power until the speed stops rising, then cuts power and watches it stop | `MAX_ROBOT_SPEED`, `ZERO_POWER_DECEL_RATE` |
+| dpad → | turn | spins in place at full power, then at `MAX_HEADING_LOCK_TURN` | `TURN_POWER_PER_RAD_PER_SEC`, plus the rate you actually pivot at while aiming |
+| dpad ← | stiction | ramps turn power up slowly until the robot starts to rotate | the smallest turn power that moves the robot |
+| Y | flywheel | commands the fastest shot in the table from a dead stop | spin-up time, and whether the top of your shot table is reachable |
+| A | — | hold to see every result as pasteable constants | |
+| B | — | clears the results | |
+| BACK | — | aborts a running test immediately | |
+
+Both straight-line numbers come from one run on purpose. The deceleration has to
+be measured from the speed the robot actually reached, and measuring them
+separately invites reading a coast-down that began from some other speed.
+
+**Reading the results**
+
+- **Run each test twice.** If two runs disagree by more than about 10%, believe
+  neither — usually the runway is too short, or the battery is sagging.
+- *"speed never plateaued"* means the robot was still accelerating when it ran out
+  of runway. `MAX_ROBOT_SPEED` is then a floor, not a measurement. Find more space.
+- *"coasted under an inch"* is normal and not a problem: the motors run in
+  `RUN_USING_ENCODER` with `BRAKE`, so zero power actively holds zero speed rather
+  than freewheeling. The resulting `ZERO_POWER_DECEL_RATE` is genuinely huge and
+  genuinely imprecise. Treat it as a starting point and finish it in
+  [§8c](#c-then-translation) by watching for overshoot.
+- **The stiction number is the one teams skip and then fight for a week.** It is
+  the smallest turn power that moves the robot at all. The heading PID's output
+  for a *small* error — say 0.30 × 5° in radians ≈ 0.026 — has to exceed it, or
+  the robot sits a few degrees off target commanding a rotation it physically will
+  not perform, and no amount of waiting closes the gap. The OpMode prints the
+  minimum `HEADING_kP` that clears the floor for a 5° error. If your kP is below
+  it, either raise kP or widen `MAX_HEADING_TOLERANCE_DEG` and accept the miss.
+- **`MAX_HEADING_LOCK_TURN` is a judgement call, not a measurement.** It caps turn
+  power so that locking onto a target does not consume the whole power budget and
+  stop the robot translating. The turn test tells you what that ceiling costs you:
+  the rate you actually pivot at while aiming. If the robot cannot come around fast
+  enough to track a goal while crossing the field, raise it toward 1.0 and accept
+  slower translation; if aiming starves the drive, lower it.
+- **The flywheel spin-up time sets how early autonomous must start the wheel.** A
+  shooting leg that opens before the wheel is at speed wastes the whole leg — that
+  is exactly what the `PathMarker` in `ShootOnTheMoveAuto` exists to prevent, and
+  this number is how you place it. If the wheel never reaches the top of the
+  table, the far end of your shot map is fiction whatever the numbers in it say:
+  shorten the table to what the wheel can actually hold.
+
+**Then measure it again after any real change** — a new drivetrain gear ratio, new
+wheels, a significantly heavier robot, or a different playing surface.
 
 ### b. Heading first
 
@@ -589,6 +657,8 @@ Before the first match:
 
 - [ ] `./tools/verify/run.sh` passes.
 - [ ] `Drivetrain Direction Check` — all motions correct.
+- [ ] `Drivetrain Characterization` run on the competition surface, and its
+      numbers actually pasted into `PathConstants`.
 - [ ] `Localization Test` — vision `accepted true`, fused pose tracks reality.
 - [ ] `Vision source` reaches `MegaTag2 | heading TRUSTED` with a tag in view.
 - [ ] Start poses in your autos match where the robot is actually placed.

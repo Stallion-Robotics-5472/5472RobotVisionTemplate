@@ -9,6 +9,24 @@ public class HardwareMap {
 
     public void put(String name, Object device) { devices.put(name, device); }
 
+    /**
+     * Every registered device that is an instance of the given class. Tests
+     * register their own with {@link #put}; a VoltageSensor is handed out at a
+     * nominal 12.5 V when none is registered, so code that reads the battery can
+     * run offline.
+     */
+    @SuppressWarnings("unchecked")
+    public <T> java.util.List<T> getAll(Class<? extends T> c) {
+        java.util.List<T> found = new java.util.ArrayList<>();
+        for (Object device : devices.values()) {
+            if (c.isInstance(device)) found.add((T) device);
+        }
+        if (found.isEmpty() && c == VoltageSensor.class) {
+            found.add((T) (VoltageSensor) () -> 12.5);
+        }
+        return found;
+    }
+
     @SuppressWarnings("unchecked")
     public <T> T get(Class<? extends T> c, String name) {
         Object registered = devices.get(name);
