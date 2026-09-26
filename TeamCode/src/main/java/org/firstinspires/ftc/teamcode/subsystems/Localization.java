@@ -65,6 +65,7 @@ public class Localization implements Localizer {
     private double lastAvgTagDist = 0.0;
     private String lastVisionSource = "none";
     private List<Integer> lastVisibleTagIds = Collections.emptyList();
+    private boolean avgTagDistanceImplausible = false;
 
     // Heading-trust gate. MegaTag2 is only used for position once MegaTag1 --
     // which is computed without the gyro -- has agreed with our heading for
@@ -336,11 +337,31 @@ public class Localization implements Localizer {
 
         // Frame accepted: publish its diagnostics.
         lastTagCount = tagCount;
-        lastAvgTagDist = result.getBotposeAvgDist();
+
+        // getBotposeAvgDist() is a bare double with no unit attached, unlike the
+        // botpose itself. Convert from whatever the SDK reports into inches.
+        lastAvgTagDist = VisionConstants.BOTPOSE_AVG_DIST_UNIT.toInches(
+                result.getBotposeAvgDist());
         acceptedFrames++;
 
+        // Sanity-check the converted distance against the size of an FTC field.
+        // This catches BOTPOSE_AVG_DIST_UNIT being wrong in either direction: a
+        // metres-as-inches mistake reads ~39x too small, the reverse ~39x too
+        // large. Clamping keeps a misconfiguration from driving the Kalman gain to
+        // 1.0 (which would make vision snap the pose on every frame); the flag
+        // tells the driver station why the numbers look odd.
+        double trustDistance = lastAvgTagDist;
+        avgTagDistanceImplausible =
+                lastAvgTagDist < VisionConstants.MIN_PLAUSIBLE_TAG_DISTANCE_IN
+                        || lastAvgTagDist > VisionConstants.MAX_PLAUSIBLE_TAG_DISTANCE_IN;
+        if (avgTagDistanceImplausible) {
+            trustDistance = Math.max(VisionConstants.MIN_PLAUSIBLE_TAG_DISTANCE_IN,
+                    Math.min(VisionConstants.MAX_PLAUSIBLE_TAG_DISTANCE_IN,
+                            lastAvgTagDist));
+        }
+
         // Dynamic std devs (AdvantageKit style): trust scales with distance^2 / tagCount.
-        double stdDevFactor = (lastAvgTagDist * lastAvgTagDist) / tagCount;
+        double stdDevFactor = (trustDistance * trustDistance) / tagCount;
         double xyStdDev = VisionConstants.VISION_XY_STD_DEV_COEFFICIENT * stdDevFactor;
         double[] visionStdDevs = {xyStdDev, xyStdDev, VisionConstants.VISION_HEADING_STD_DEV};
 
@@ -500,6 +521,15 @@ public class Localization implements Localizer {
         return lastVisibleTagIds.contains(id);
     }
 
+    /**
+     * True when the reported average tag distance does not look like a distance on
+     * an FTC field, which almost always means
+     * {@link VisionConstants#BOTPOSE_AVG_DIST_UNIT} is set to the wrong unit.
+     */
+    public boolean isAvgTagDistanceImplausible() {
+        return avgTagDistanceImplausible;
+    }
+
     /** Which solver supplied the most recent accepted position. */
     public String getLastVisionSource() {
         return lastVisionSource;
@@ -603,8 +633,13 @@ public class Localization implements Localizer {
             telemetry.addData("Raw Vision 2D", "x %.1f  y %.1f  h %.1f deg  (age %.2fs)",
                     vis.getX(), vis.getY(), vis.getRotation().getDegrees(),
                     getVisionPose3dAge(now));
-            telemetry.addData("Vision tags/dist", "tags %d  dist %.1f",
+            telemetry.addData("Vision tags/dist", "tags %d  dist %.1f in",
                     getLastTagCount(), getLastAvgTagDistance());
+            if (avgTagDistanceImplausible) {
+                telemetry.addLine("*** TAG DISTANCE LOOKS WRONG ***");
+                telemetry.addLine("Check VisionConstants.BOTPOSE_AVG_DIST_UNIT:");
+                telemetry.addLine("~39x too small = should be INCH, too large = METER");
+            }
             telemetry.addData("Vision 3D", "z %.1f  pitch %.1f  roll %.1f deg",
                     getVisionZ(), Math.toDegrees(getVisionPitch()), Math.toDegrees(getVisionRoll()));
         } else {

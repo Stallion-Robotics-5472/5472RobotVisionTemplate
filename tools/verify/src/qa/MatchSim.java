@@ -260,7 +260,22 @@ public class MatchSim {
         } else {
             result.valid = true;
             result.tagCount = Math.min(2, seen.size());
-            result.avgDist = 40.0;
+            // Report the real distance to the nearest visible goal, expressed in
+            // whatever unit the SDK is configured to report -- so the sim
+            // exercises the unit conversion rather than bypassing it.
+            double nearestIn = Double.MAX_VALUE;
+            for (Goal goal : goals) {
+                if (!goal.isSeenAmong(seen)) {
+                    continue;
+                }
+                nearestIn = Math.min(nearestIn, GoalSelector.positionFor(goal, alliance)
+                        .getDistance(truePose.getTranslation()));
+            }
+            if (nearestIn == Double.MAX_VALUE) {
+                nearestIn = 40.0;
+            }
+            result.avgDist =
+                    VisionConstants.BOTPOSE_AVG_DIST_UNIT.fromInches(nearestIn);
             // A good fix: botpose is the true pose. Odometry drift is the error
             // source here, and vision is what should be removing it.
             Pose3D pose = new Pose3D(truePose.getX(), truePose.getY(), truePose.getHeading());

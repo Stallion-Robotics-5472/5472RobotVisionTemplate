@@ -328,6 +328,8 @@ one group. The scheduler is per-OpMode, **not** a static singleton.
 | `CAMERA_PITCH_OFFSET_DEG` | `0.0` | **negative = tilted up** |
 | `ODOMETRY_STD_DEVS` | `{0.5, 0.5, 2°}` | lower = trust odometry more |
 | `VISION_XY_STD_DEV_COEFFICIENT` | `0.0005` | **inches, not metres** — see below |
+| `BOTPOSE_AVG_DIST_UNIT` | `METER` | unit of `getBotposeAvgDist()`, a bare double. Verify against a tape measure |
+| `MIN/MAX_PLAUSIBLE_TAG_DISTANCE_IN` | `4 / 250` | range check that catches a wrong unit either way |
 | `VISION_HEADING_STD_DEV` | `45°` | large on purpose; gyro owns heading |
 | `PREFER_MEGATAG2` | `true` | use MegaTag2 for position once heading is trusted |
 | `HEADING_TRUST_FRAMES` | `10` | agreeing frames needed to trust heading |
@@ -410,6 +412,8 @@ Telemetry shows `Vision source: MegaTag2 | heading TRUSTED`.
 | Always trails a moving aim | raise `PHASE_DELAY_SECONDS`; check `TURN_POWER_PER_RAD_PER_SEC` in `DriveSubsystem` |
 | Never fires | read `AimAndShootCommand.getStatus()` — it names the blocker |
 | Distance disagrees with tape | the goal's position, or the seeded start pose |
+| Pose snaps/jitters on every frame | `BOTPOSE_AVG_DIST_UNIT` wrong — gain pinned near 1.0 |
+| `TAG DISTANCE LOOKS WRONG` on telemetry | same; ~39x small = `INCH`, ~39x large = `METER` |
 | Robot swings between two goals | `GOAL_SWITCH_FRAMES` too low |
 | Always picks the wrong goal | `GOAL_TAG_MEANING` inverted, or wrong tag IDs |
 

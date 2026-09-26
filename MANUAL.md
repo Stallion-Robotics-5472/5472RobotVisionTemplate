@@ -629,6 +629,19 @@ The heading loop is inverted — positive feedback. Check the motor directions
 first ([§4](#4-check-the-drivetrain-before-anything-else)), then
 `HEADING_CORRECTION_SIGN` (should be `+1.0`).
 
+### The pose snaps or jitters on every vision frame
+
+`VisionConstants.BOTPOSE_AVG_DIST_UNIT` is probably wrong. `getBotposeAvgDist()`
+is a bare double with no unit attached; the Limelight reports metres natively.
+Treating metres as inches shrinks the std dev ~1550x (it goes as distance squared)
+and pins the Kalman gain near 1.0, so every frame snaps the pose and distance
+weighting is gone.
+
+Check it: stand a measured distance from a tag and compare the `Vision tags/dist`
+telemetry, which is in inches. ~39x too small means set it to `INCH`; ~39x too
+large means `METER`. The subsystem prints `*** TAG DISTANCE LOOKS WRONG ***` when
+the value is not a believable distance on an FTC field.
+
 ### The fused pose ignores vision completely
 
 `Fused` tracks `Raw Odometry` exactly even with `accepted true`. The Kalman gain

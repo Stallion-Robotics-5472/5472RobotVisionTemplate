@@ -60,6 +60,16 @@ public class HeadingTrustTest {
         localization.update();
     }
 
+    /** Feeds a frame with an explicit average tag distance, in the reported unit. */
+    void feedWithDistance(double x, double y, double headingDeg, double avgDistInReportedUnit) {
+        LLResult r = new LLResult();
+        r.botpose = new Pose3D(x, y, Math.toRadians(headingDeg));
+        r.botposeMt2 = new Pose3D(x, y, Math.toRadians(headingDeg));
+        r.avgDist = avgDistInReportedUnit;
+        camera.nextResult = r;
+        localization.update();
+    }
+
     void run(int frames, double x, double y, double headingDeg) {
         for (int i = 0; i < frames; i++) {
             feed(x, y, headingDeg);
@@ -188,6 +198,46 @@ public class HeadingTrustTest {
         System.out.printf("   estimate is now %.1f in from the insisted position%n", err);
         check("Estimate actually converges on the camera", err < 20.0,
                 String.format("still %.1f in away", err));
+
+        // ---- 5b. The average tag distance is converted, and a wrong unit caught --
+        // getBotposeAvgDist() is a bare double with no unit attached. If the
+        // configured unit is wrong, the distance is off by ~39x, the std dev by
+        // ~1550x, and the Kalman gain pins to 1.0 -- vision snaps the pose every
+        // frame and the distance weighting is gone. So the value is range-checked.
+        System.out.println();
+        System.out.printf("   BOTPOSE_AVG_DIST_UNIT = %s%n",
+                VisionConstants.BOTPOSE_AVG_DIST_UNIT);
+
+        HeadingTrustTest units = new HeadingTrustTest();
+        units.setOdometry(10, 10, 0);
+        units.localization.setStartingPose(new Pose2d(10, 10, new Rotation2d(0)));
+        // A believable frame: about 40 inches, expressed in the reported unit.
+        units.feedWithDistance(10, 10, 0,
+                VisionConstants.BOTPOSE_AVG_DIST_UNIT.fromInches(40.0));
+        System.out.printf("   40 in reported as %.4f %s -> read back %.1f in%n",
+                VisionConstants.BOTPOSE_AVG_DIST_UNIT.fromInches(40.0),
+                VisionConstants.BOTPOSE_AVG_DIST_UNIT,
+                units.localization.getLastAvgTagDistance());
+        check("Tag distance is converted into inches",
+                Math.abs(units.localization.getLastAvgTagDistance() - 40.0) < 0.01,
+                "" + units.localization.getLastAvgTagDistance());
+        check("A believable distance is not flagged",
+                !units.localization.isAvgTagDistanceImplausible(), "flagged wrongly");
+
+        // Now the misconfiguration: a value that is ~39x too small once converted,
+        // which is exactly what metres-read-as-inches looks like.
+        units.feedWithDistance(10, 10, 0,
+                VisionConstants.BOTPOSE_AVG_DIST_UNIT.fromInches(40.0) / 39.37);
+        check("A distance ~39x too small is flagged",
+                units.localization.isAvgTagDistanceImplausible(),
+                "a wrong unit would pass unnoticed");
+
+        // And the other direction.
+        units.feedWithDistance(10, 10, 0,
+                VisionConstants.BOTPOSE_AVG_DIST_UNIT.fromInches(40.0) * 39.37);
+        check("A distance ~39x too large is flagged",
+                units.localization.isAvgTagDistanceImplausible(),
+                "a wrong unit would pass unnoticed");
 
         // ---- 6. The gyro heading really is pushed to the camera for MegaTag2 ----
         System.out.println();

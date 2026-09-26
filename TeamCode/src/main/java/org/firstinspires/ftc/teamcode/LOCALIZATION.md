@@ -174,6 +174,46 @@ field usually means the camera-offset config is wrong). If you need a fused
 pitch/roll for control, add the Control Hub IMU as the source — the Pinpoint
 does not expose it.
 
+## Units, and the one place they are not automatic
+
+The Limelight works in **metres** natively, in FTC exactly as in FRC — it is the
+same firmware and the same JSON. This template works in **inches**. Most of that
+seam is handled for you, but not all of it:
+
+| Value | Safe? | Why |
+|---|---|---|
+| `getBotpose()` position | **yes** | arrives as a `Position` carrying its own unit; the code calls `.toUnit(DistanceUnit.INCH)` |
+| `getBotpose()` orientation | **yes** | read with an explicit `AngleUnit.RADIANS` |
+| `getStaleness()`, `getCaptureLatency()`, `getTargetingLatency()` | yes | milliseconds, no ambiguity |
+| `getBotposeTagCount()` | yes | a count |
+| **`getBotposeAvgDist()`** | **needs a constant** | a bare `double` with no unit attached |
+
+That last one is set by `VisionConstants.BOTPOSE_AVG_DIST_UNIT`, defaulting to
+`METER` because that is what the Limelight documents reporting and the SDK most
+likely passes straight through.
+
+**Why it matters more than it looks.** The vision std dev goes as distance
+*squared*, so reading metres as inches shrinks the distance 39x and the std dev
+about 1550x. That pins the Kalman gain near 1.0 at every range:
+
+| true distance | gain, correct | gain, unit wrong |
+|---|---|---|
+| 20″ | 0.72 | 1.00 |
+| 39″ | 0.39 | 1.00 |
+| 98″ | 0.09 | 0.99 |
+
+Distance weighting disappears entirely, close and far frames are trusted the
+same, and a single noisy tag yanks the pose across the field — the exact mirror
+of the coefficient-units bug described under Tuning.
+
+**You do not have to take the default on faith.** The converted distance is on
+telemetry in inches (`Vision tags/dist`). Stand a measured distance from a tag and
+compare. Roughly 39x too small means it should be `INCH`; 39x too large means
+`METER`. The subsystem also range-checks it against the size of an FTC field, says
+`*** TAG DISTANCE LOOKS WRONG ***` on telemetry when it is out of range, and clamps
+the value used for weighting so a wrong unit degrades the trust curve instead of
+destroying it.
+
 ## Tuning
 
 All knobs are in `VisionConstants`:

@@ -151,6 +151,40 @@ public final class VisionConstants {
     public static final double[] DEFAULT_VISION_STD_DEVS = {2.0, 2.0, Math.toRadians(30.0)};
 
     /**
+     * The unit {@code LLResult.getBotposeAvgDist()} reports in.
+     *
+     * THIS ONE IS WORTH CHECKING ON YOUR SDK VERSION. Unlike the botpose itself --
+     * which arrives as a Position carrying its own unit, so the code converts it
+     * safely no matter what -- the average tag distance is a bare double with no
+     * unit attached. The Limelight reports `botpose_avgdist` in METRES natively
+     * (its own documentation says so), and the FTC SDK most likely passes that
+     * straight through, so METER is the default here.
+     *
+     * Getting it wrong is not subtle, but it is silent. Treating metres as inches
+     * shrinks every distance by 39x, and since the std dev goes as distance
+     * SQUARED that shrinks it ~1550x -- which drives the Kalman gain to 0.99 at
+     * every range. Distance weighting disappears, close and far frames are trusted
+     * equally, and a single noisy tag yanks the pose across the field.
+     *
+     * You do not have to take this on faith: {@link Localization#getLastAvgTagDistance()}
+     * is printed on telemetry in inches. Stand a measured distance from a tag and
+     * compare. If it reads about 39x too small, this should be INCH; about 39x too
+     * large, METER. The subsystem also range-checks it and says so on telemetry.
+     */
+    public static final DistanceUnit BOTPOSE_AVG_DIST_UNIT = DistanceUnit.METER;
+
+    /**
+     * Range a believable average tag distance falls in, inches. An FTC field's
+     * corner-to-corner span is about 204 inches, and a tag closer than a few
+     * inches cannot produce a usable fix, so anything outside this points at
+     * {@link #BOTPOSE_AVG_DIST_UNIT} being wrong. Outside it, the value is clamped
+     * for the trust calculation -- so a misconfiguration degrades the weighting
+     * instead of destroying it -- and flagged on telemetry.
+     */
+    public static final double MIN_PLAUSIBLE_TAG_DISTANCE_IN = 4.0;
+    public static final double MAX_PLAUSIBLE_TAG_DISTANCE_IN = 250.0;
+
+    /**
      * Base XY std dev coefficient used to scale per-frame vision trust:
      *
      *     xyStdDev = COEFFICIENT * avgTagDistance^2 / tagCount

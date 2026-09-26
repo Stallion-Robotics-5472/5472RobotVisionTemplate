@@ -11,7 +11,11 @@ public class LLResult {
     public long staleness = 0;
     public Pose3D botpose;
     public Pose3D botposeMt2;
-    public double avgDist = 30.0;
+    /**
+     * Average tag distance, in the unit the SDK reports -- metres by default, per
+     * VisionConstants.BOTPOSE_AVG_DIST_UNIT. 1.0 m is about 39 inches.
+     */
+    public double avgDist = 1.0;
     public double captureLatency = 10.0;
     public double targetingLatency = 5.0;
     /** Tags "in frame", for goal-selection tests. */
