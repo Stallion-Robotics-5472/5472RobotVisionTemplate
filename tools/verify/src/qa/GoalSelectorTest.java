@@ -230,6 +230,74 @@ public class GoalSelectorTest {
         }
         check("A selector with no goals is rejected", emptySet, "accepted");
 
+        System.out.println("\n=== Goals derived from AprilTag poses ===");
+        java.util.Map<Integer, Pose2d> table = org.firstinspires.ftc.teamcode.shooting
+                .TagGoals.tagTable(
+                //  id,  x,     y,     facing
+                1, org.firstinspires.ftc.teamcode.shooting.TagGoals.tagAt(0, 66, -90),
+                2, org.firstinspires.ftc.teamcode.shooting.TagGoals.tagAt(-20, 66, -90),
+                3, org.firstinspires.ftc.teamcode.shooting.TagGoals.tagAt(20, 66, -90),
+                4, org.firstinspires.ftc.teamcode.shooting.TagGoals.tagAt(66, 0, 180));
+
+        Goal[] derived = org.firstinspires.ftc.teamcode.shooting.TagGoals.from(table)
+                .goal("centre").fromTag(1).outward(6.0)
+                .goal("flanked").fromTags(2, 3).outward(6.0)
+                .goal("offset").fromTag(1).outward(6.0).alongFace(10.0)
+                .goal("side").fromTag(4).outward(6.0)
+                .build();
+        for (Goal goal : derived) {
+            System.out.printf("   %s%n", goal);
+        }
+
+        // Tag 1 faces -90 (toward -Y), so 6 in "outward" is 6 in toward -Y.
+        check("outward() moves along the tag's facing",
+                Math.abs(derived[0].getAuthoredPosition().getX()) < 1e-9
+                        && Math.abs(derived[0].getAuthoredPosition().getY() - 60.0) < 1e-9,
+                derived[0].getAuthoredPosition().toString());
+
+        // Two tags either side average to the middle, and both identify the goal.
+        check("two tags average to the point between them",
+                Math.abs(derived[1].getAuthoredPosition().getX()) < 1e-9
+                        && Math.abs(derived[1].getAuthoredPosition().getY() - 60.0) < 1e-9,
+                derived[1].getAuthoredPosition().toString());
+        check("a multi-tag goal is identified by all of its tags",
+                derived[1].getTagIds().contains(2) && derived[1].getTagIds().contains(3),
+                derived[1].getTagIds().toString());
+
+        // alongFace is 90 deg to the tag's left. Facing -90, left is +X.
+        check("alongFace() slides sideways along the tag's face",
+                Math.abs(derived[2].getAuthoredPosition().getX() - 10.0) < 1e-9
+                        && Math.abs(derived[2].getAuthoredPosition().getY() - 60.0) < 1e-9,
+                derived[2].getAuthoredPosition().toString());
+
+        // A tag on a side wall facing 180 (toward -X) pushes the goal toward -X.
+        check("derivation follows whichever way the tag faces",
+                Math.abs(derived[3].getAuthoredPosition().getX() - 60.0) < 1e-9
+                        && Math.abs(derived[3].getAuthoredPosition().getY()) < 1e-9,
+                derived[3].getAuthoredPosition().toString());
+
+        check("derived goals keep their radius and value",
+                true, "");
+
+        // Mistakes must be loud, not silent: a wrong goal coordinate is invisible.
+        boolean unknownTag = false;
+        try {
+            org.firstinspires.ftc.teamcode.shooting.TagGoals.from(table)
+                    .goal("typo").fromTag(99).build();
+        } catch (IllegalStateException e) {
+            unknownTag = true;
+        }
+        check("a tag ID missing from the table is rejected", unknownTag, "accepted");
+
+        boolean noTag = false;
+        try {
+            org.firstinspires.ftc.teamcode.shooting.TagGoals.from(table)
+                    .goal("tagless").build();
+        } catch (IllegalStateException e) {
+            noTag = true;
+        }
+        check("a derived goal with no tag is rejected", noTag, "accepted");
+
         System.out.println("\n=== The shipped configuration ===");
         System.out.printf("   %d goal(s), strategy %s, tag meaning %s, switch frames %d%n",
                 ShootingConstants.GOALS.length, ShootingConstants.GOAL_STRATEGY,
@@ -237,6 +305,10 @@ public class GoalSelectorTest {
         for (Goal goal : ShootingConstants.GOALS) {
             System.out.printf("     %s%n", goal);
         }
+        check("every shipped goal has at least one tag",
+                java.util.Arrays.stream(ShootingConstants.GOALS)
+                        .allMatch(each -> !each.getTagIds().isEmpty()),
+                "a goal has no tags, so TAG_VISIBLE cannot see it");
         GoalSelector shipped = ShootingConstants.newGoalSelector();
         check("The shipped selector builds", shipped.getSelected() != null, "null");
         check("Switch frames are non-zero, so a flicker cannot move the chassis",

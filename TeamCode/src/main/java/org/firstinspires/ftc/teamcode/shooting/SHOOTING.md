@@ -138,21 +138,67 @@ shot. Even a rough value beats zero by a mile.
 Everything lives in [`ShootingConstants.java`](ShootingConstants.java), in the
 order you should fill it in.
 
-### 1. The goals — nothing works until these are right
+### 1. The goals — derive them from the AprilTags
+
+The tags are already surveyed into the field frame — that is what makes
+localization work — so **a tag beside a goal already tells you where that goal
+is**. Enter the tag poses once and derive the goals from them:
 
 ```java
-public static final Goal[] GOALS = {
-        Goal.named("primary", 0.0, 60.0)
-                .tags(/* TODO: real tag IDs */)
-                .radius(6.0)
-                .worth(1)
-                .build(),
-};
+public static final Map<Integer, Pose2d> TAG_FIELD_POSES = TagGoals.tagTable(
+        //        id,            x,     y,  facing (deg)
+        11, TagGoals.tagAt(  -36.0,  66.0,  -90.0),
+        21, TagGoals.tagAt(   36.0,  66.0,  -90.0));
+
+public static final Goal[] GOALS = TagGoals.from(TAG_FIELD_POSES)
+        .goal("hive").fromTag(11).outward(6.0).radius(7.0).worth(5)
+        .goal("flower").fromTag(21).outward(6.0).radius(9.0).worth(2)
+        .build();
 ```
 
-**The shipped entry is a placeholder and will aim at empty field.** These cannot be
-guessed — read them off the season's Competition Manual and field drawings. For each
-goal you need:
+Why derive rather than type coordinates twice: a typo in a hand-entered goal
+coordinate is **silent**. Aiming is confidently wrong, the pose estimate looks
+fine, and nothing flags it. A wrong *tag* pose, by contrast, makes localization
+and aiming disagree with each other in a way you can see.
+
+**What deriving does not save you.** It cannot invent the offset from the tag to
+the point the piece must pass through, because only the field drawings know that —
+a tag on a goal's face is not at the middle of its opening. So you still supply:
+
+| | |
+|---|---|
+| `outward(n)` | *n* inches in front of the tag's face, along the way it faces (toward the robot) |
+| `alongFace(n)` | *n* inches sideways along the face, positive to the tag's left |
+
+That is a ruler measurement off a drawing rather than a coordinate conversion.
+
+`fromTags(2, 3)` averages two tags, for a goal flanked by one either side — the
+position lands between them and **both** tags identify it.
+
+Mistakes are loud: an unknown tag ID or a derived goal with no tag throws at
+construction rather than aiming somewhere wrong.
+
+A goal with no tag at all can still be declared the long way with
+`Goal.named("x", xIn, yIn)` and mixed into the same array.
+
+### Checking the result
+
+Whichever way you enter them, verify with **Shooter Map Tuning**: park somewhere,
+compare the `DISTANCE` readout to a tape measure, and adjust until they agree.
+
+### 1b. If you enter coordinates directly instead
+
+```java
+Goal.named("primary", 0.0, 60.0)
+        .tags(11, 12)
+        .radius(6.0)
+        .worth(1)
+        .build()
+```
+
+**The shipped values are placeholders and will aim at the wrong place.** They cannot
+be guessed — read them off the season's Competition Manual and field drawings. For
+each goal you need:
 
 - **Position**, in this template's frame (origin at field centre, +X right, +Y away
   from the audience, inches). Aim at the point the piece must pass *through* — the
@@ -360,6 +406,37 @@ playing. The suite checks that a fully mirrored situation (robot pose, velocity
 and goal) produces the exactly mirrored aim.
 
 ---
+
+## Simulated matches
+
+`./tools/verify/run.sh` plays a **full red match and the mirrored blue match** with
+the real subsystems driving a simulated robot: mecanum forward kinematics from the
+actual motor powers, accumulating odometry drift, a camera with a real field of
+view that only sees tags when a goal is actually in frame, and time stepped in 20 ms
+slices so every controller gets the `dt` it will see on the field.
+
+It checks per match that vision actually corrects drift, that the pose and heading
+stay accurate, that the robot fires, that it **never** fires outside its own aim
+tolerance or outside the shot table's data, and that the target does not thrash.
+Then it checks red against blue: the mirror residual, the final headings, shot
+counts and goal choice. They currently mirror to **0.000 in**, which is the evidence
+that nothing is alliance-dependent that should not be.
+
+Three failure scenarios run too:
+
+| Scenario | What must happen |
+|---|---|
+| Robot placed backwards (180° seed) | flagged suspect, **never fires while wrong**, recovers on `seedFromVision()` |
+| No Limelight at all | still shoots — the pose-trust gate must not deadlock without a camera |
+| Camera lost mid-match | target does not thrash, keeps shooting on odometry, recovers when it returns |
+
+### One thing the sim surfaced
+
+If the robot's **start heading does not put a goal tag in the camera's view**, the
+start-pose check cannot run at init, so the pose-trust gate keeps the shooter
+blocked until the robot first turns toward a goal. It recovers by itself, but you
+lose the pre-match warning that would have caught a wrong alliance button. Orient
+the robot — or the camera — so a tag is visible while sitting on the field.
 
 ## How it is verified
 

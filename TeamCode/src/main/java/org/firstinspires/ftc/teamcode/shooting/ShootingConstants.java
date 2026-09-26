@@ -11,6 +11,7 @@ package org.firstinspires.ftc.teamcode.shooting;
 
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 
+import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Translation2d;
 
 public final class ShootingConstants {
@@ -27,41 +28,51 @@ public final class ShootingConstants {
             org.firstinspires.ftc.teamcode.pathing.Alliance.RED;
 
     /**
-     * Every goal the robot can shoot at.
+     * Where each AprilTag sits in the field frame: ID -> pose, with the pose's
+     * rotation being the direction the tag FACES. Inches, degrees.
      *
-     * THE ROWS BELOW ARE PLACEHOLDERS. Nothing aims correctly until they are the
-     * real thing, and they cannot be guessed -- read them off the season's
-     * Competition Manual and field drawings. For each goal you need:
+     * FILL THIS IN FROM THE FIELD DRAWINGS (or the .fmap you upload to the
+     * Limelight -- same numbers, converted into this frame: origin at field
+     * centre, +X right, +Y away from the audience).
      *
-     *   - its field position, in this template's frame (origin at field centre,
-     *     +X right, +Y away from the audience, inches). Aim at the point the piece
-     *     must pass THROUGH -- the middle of the opening, not of the structure.
-     *   - the AprilTag IDs on or beside it, so the robot can tell which goal it is
-     *     looking at. See GoalSelector.Strategy.TAG_VISIBLE.
-     *   - its own shot table IF its height differs from the others. One flywheel
-     *     and hood curve cannot serve two heights.
-     *   - what it scores, if you want the best-value strategy to use it.
+     * Only the tags on or beside the goals you shoot at are needed. Enter them for
+     * ONE alliance; {@link #AUTHORED_FOR} says which, and everything is flipped at
+     * run time.
      *
-     * To sanity-check a position: run "Shooter Map Tuning", park somewhere, and
-     * compare the DISTANCE readout against a tape measure to that goal.
-     *
-     * A single-goal game is fine -- leave one entry and selection is a no-op.
+     * The values below are placeholders. They are a coherent example, not your
+     * field.
      */
-    public static final Goal[] GOALS = {
-            Goal.named("primary", 0.0, 60.0)
-                    .tags(/* TODO: real tag IDs from the field drawings */)
-                    .radius(6.0)
-                    .worth(1)
-                    .build(),
-            // A second goal, as an example of the shape. DELETE IT or replace it
-            // with the real thing -- shipped as-is it will aim at empty field.
-            // Goal.named("secondary", 0.0, 40.0)
-            //         .tags(/* TODO */)
-            //         .radius(8.0)
-            //         .worth(3)
-            //         .map(SECONDARY_SHOT_MAP)   // its own curve, different height
-            //         .build(),
-    };
+    public static final java.util.Map<Integer, Pose2d> TAG_FIELD_POSES = TagGoals.tagTable(
+            //        id,            x,     y,  facing (deg)
+            11, TagGoals.tagAt(  -36.0,  66.0,  -90.0),
+            21, TagGoals.tagAt(   36.0,  66.0,  -90.0));
+
+    /**
+     * Every goal the robot can shoot at, derived from the tags above.
+     *
+     * Deriving beats typing coordinates twice: the tags are already surveyed into
+     * the field frame, so a tag beside a goal already says where that goal is. A
+     * typo in a separately-entered goal coordinate is silent -- aiming is
+     * confidently wrong and nothing flags it.
+     *
+     * What still has to come off the drawings is the small offset from the tag to
+     * the point the piece must pass through, because a tag on a goal's face is not
+     * at the middle of its opening:
+     *
+     *   outward(n)    n inches in front of the tag's face (toward the robot)
+     *   alongFace(n)  n inches sideways along the face, positive to the tag's left
+     *
+     * THESE ROWS ARE PLACEHOLDERS and will aim at the wrong place until the tag
+     * table and the offsets are real. Check each one with the "Shooter Map Tuning"
+     * OpMode: park somewhere and compare the DISTANCE readout to a tape measure.
+     *
+     * A goal with no tag can still be declared the long way, with
+     * {@code Goal.named("x", xIn, yIn)...build()}, and mixed into this array.
+     */
+    public static final Goal[] GOALS = TagGoals.from(TAG_FIELD_POSES)
+            .goal("hive").fromTag(11).outward(6.0).radius(7.0).worth(5)
+            .goal("flower").fromTag(21).outward(6.0).radius(9.0).worth(2)
+            .build();
 
     /**
      * How the robot picks between {@link #GOALS}.

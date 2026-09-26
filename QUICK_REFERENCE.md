@@ -190,6 +190,15 @@ Translation2d goal = sel.getTargetPosition(alliance);
 sel.lockTo("high") / cycle() / auto(strategy) / freeze(true)
 sel.describe()                   // one telemetry line
 
+// derive goals from the surveyed tag poses (preferred)
+GOALS = TagGoals.from(TAG_FIELD_POSES)
+        .goal("hive").fromTag(11).outward(6).radius(7).worth(5).map(HIGH_MAP)
+        .goal("flower").fromTags(21, 22).outward(6).radius(9).worth(2)
+        .build();
+//   outward(n)    n in front of the tag's face (toward the robot)
+//   alongFace(n)  n sideways along the face, + to the tag's left
+
+// or enter coordinates directly
 Goal.named("high", 0, 60).tags(21, 22).radius(8).worth(5).map(HIGH_MAP).build();
 
 // shot table
@@ -283,7 +292,8 @@ one group. The scheduler is per-OpMode, **not** a static singleton.
 
 | Constant | Default | Meaning |
 |---|---|---|
-| `GOALS` | 1 placeholder | **PLACEHOLDER — set these.** Each goal's position, tag IDs, radius, value, own shot map |
+| `TAG_FIELD_POSES` | 2 placeholders | **PLACEHOLDER — set these.** Tag ID → field pose; goals are derived from them |
+| `GOALS` | derived | Built by `TagGoals.from(TAG_FIELD_POSES)`; add `outward`/`alongFace` offsets per goal |
 | `AUTHORED_FOR` | `RED` | Alliance the goal positions are written for |
 | `GOAL_STRATEGY` | `TAG_VISIBLE` | How the robot picks a goal |
 | `GOAL_TAG_MEANING` | `VISIBLE_MEANS_AVAILABLE` | **Check the manual** — invert if a covered tag marks the open goal |

@@ -18,6 +18,7 @@ package org.firstinspires.ftc.teamcode.pathing;
 
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Translation2d;
+import org.firstinspires.ftc.teamcode.lib.util.RobotClock;
 
 public class Follower {
     private final Localizer localizer;
@@ -73,7 +74,7 @@ public class Follower {
 
     /** Convenience for OpModes: drives using the wall clock. */
     public boolean update() {
-        return update(System.nanoTime() / 1.0e9);
+        return update(RobotClock.nowSeconds());
     }
 
     /**

@@ -23,6 +23,7 @@ import org.firstinspires.ftc.teamcode.lib.command.SubsystemBase;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Translation2d;
+import org.firstinspires.ftc.teamcode.lib.util.RobotClock;
 import org.firstinspires.ftc.teamcode.pathing.Alliance;
 import org.firstinspires.ftc.teamcode.pathing.MecanumDrivetrain;
 import org.firstinspires.ftc.teamcode.pathing.PIDFController;
@@ -113,7 +114,7 @@ public class DriveSubsystem extends SubsystemBase {
      */
     public void driveWithHeadingLock(double fieldX, double fieldY, double targetHeadingRad,
                                     double feedforwardRadPerSec) {
-        double now = System.nanoTime() / 1.0e9;
+        double now = RobotClock.nowSeconds();
         double dt = Double.isNaN(lastTimeSeconds) ? 0.0 : now - lastTimeSeconds;
         lastTimeSeconds = now;
 

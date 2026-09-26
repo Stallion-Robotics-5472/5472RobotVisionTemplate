@@ -417,16 +417,31 @@ for how it works; this is the order to set it up in. Everything is in
 
 ### a. The goals — nothing works until these are right
 
-BIOBUZZ scores on hives and flowers, so list every goal you shoot at in
-`ShootingConstants.GOALS`:
+BIOBUZZ scores on hives and flowers, so every goal you shoot at is listed in
+`ShootingConstants.GOALS`. **Derive them from the AprilTag poses** rather than typing
+coordinates twice — the tags are already surveyed into the field frame, so a tag
+beside a goal already says where that goal is:
 
 ```java
-Goal.named("primary", 0.0, 60.0)
-        .tags(/* AprilTag IDs from the field drawings */)
-        .radius(6.0)
-        .worth(1)
-        .build(),
+public static final Map<Integer, Pose2d> TAG_FIELD_POSES = TagGoals.tagTable(
+        //        id,            x,     y,  facing (deg)
+        11, TagGoals.tagAt(  -36.0,  66.0,  -90.0),
+        21, TagGoals.tagAt(   36.0,  66.0,  -90.0));
+
+public static final Goal[] GOALS = TagGoals.from(TAG_FIELD_POSES)
+        .goal("hive").fromTag(11).outward(6.0).radius(7.0).worth(5)
+        .goal("flower").fromTag(21).outward(6.0).radius(9.0).worth(2)
+        .build();
 ```
+
+A typo in a hand-entered goal coordinate is silent — aiming is confidently wrong and
+nothing flags it. A wrong tag pose instead makes localization and aiming visibly
+disagree.
+
+You still supply the small offset from the tag to the point the piece must pass
+through, since only the drawings know it: `outward(n)` is *n* inches in front of the
+tag's face, `alongFace(n)` slides sideways along it. `fromTags(2, 3)` averages two
+tags for a goal flanked by one either side.
 
 **The shipped entry is a placeholder and will aim at empty field.** Read the real
 values off the season's Competition Manual and field drawings, converting positions
@@ -579,6 +594,8 @@ Before the first match:
 - [ ] Start poses in your autos match where the robot is actually placed.
 - [ ] Limelight field map is **this season's**.
 - [ ] Every goal's position verified against a tape measure.
+- [ ] Robot's start heading puts a goal tag in the camera's view, so the
+      pre-match start-pose check can actually run.
 - [ ] `GOAL_TAG_MEANING` matches how the manual uses tags.
 - [ ] `SHOT_MAP` built from real shots, with **non-zero flight times**.
 - [ ] Shoot On The Move fires while driving, not just standing still.

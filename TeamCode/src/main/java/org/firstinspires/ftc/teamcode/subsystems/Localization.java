@@ -41,6 +41,7 @@ import org.firstinspires.ftc.teamcode.lib.estimator.PoseEstimator;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose3d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Translation2d;
+import org.firstinspires.ftc.teamcode.lib.util.RobotClock;
 import org.firstinspires.ftc.teamcode.pathing.Localizer;
 
 import java.util.Collections;
@@ -620,6 +621,6 @@ public class Localization implements Localizer {
 
     /** Monotonic clock shared by odometry samples and vision timestamps. */
     private static double currentTimeSeconds() {
-        return System.nanoTime() / 1.0e9;
+        return RobotClock.nowSeconds();
     }
 }

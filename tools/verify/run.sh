@@ -58,7 +58,8 @@ else
 fi
 
 for T in Geom3dTest DriveTest EstimatorTest HeadingTrustTest CommandTest \
-         ShooterMapTest AimLogicTest GoalSelectorTest CodegenCompileTest; do
+         ShooterMapTest AimLogicTest GoalSelectorTest CodegenCompileTest \
+         MatchTest; do
   echo "=============== $T ==============="
   if ! java -Drepo.root="$REPO" -cp "$BUILD/out" "qa.$T" "$POLARITY"; then STATUS=1; fi
   echo
