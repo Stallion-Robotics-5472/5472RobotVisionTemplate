@@ -33,8 +33,10 @@ import org.firstinspires.ftc.teamcode.commands.AimAndShootCommand;
 import org.firstinspires.ftc.teamcode.lib.command.CommandOpMode;
 import org.firstinspires.ftc.teamcode.lib.command.Commands;
 import org.firstinspires.ftc.teamcode.lib.command.RunCommand;
+import org.firstinspires.ftc.teamcode.lib.util.BatteryMonitor;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
+import org.firstinspires.ftc.teamcode.logging.MatchRecorder;
 import org.firstinspires.ftc.teamcode.pathing.Alliance;
 import org.firstinspires.ftc.teamcode.shooting.GoalSelector;
 import org.firstinspires.ftc.teamcode.shooting.ShootingConstants;
@@ -53,10 +55,21 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
      */
     private static final Pose2d START_POSE = new Pose2d(0, 0, new Rotation2d(0));
 
+    /**
+     * Records a CSV of what the robot believed, once per loop, to
+     * /sdcard/FIRST/matchlogs. Measured at well under 1% of the loop budget, and it
+     * cannot block the loop or take the OpMode down -- see logging/MatchLog. Set
+     * false if you would rather not write to storage at all.
+     */
+    private static final boolean RECORD_MATCH = true;
+
     private DriveSubsystem drive;
     private ShooterSubsystem shooter;
     private AimAndShootCommand aimAndShoot;
     private GoalSelector goalSelector;
+
+    private MatchRecorder recorder;
+    private BatteryMonitor battery;
 
     private Alliance alliance = Alliance.RED;
     private Rotation2d driverForwardOffset = new Rotation2d(0);
@@ -68,6 +81,7 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
         register(drive, shooter);
 
         drive.getLocalization().setStartingPose(START_POSE);
+        battery = BatteryMonitor.from(hardwareMap);
 
         // Alliance select during init. Only the driver's point of view and which
         // goal we aim at change; the pose frame is absolute either way.
@@ -134,7 +148,20 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
     }
 
     @Override
+    public void onStart() {
+        if (RECORD_MATCH) {
+            // Shares the OpMode's loop timer, so the log's loop columns are the same
+            // numbers the telemetry shows.
+            recorder = new MatchRecorder("teleop", drive, getLoopTimer())
+                    .withShooter(shooter)
+                    .withAim(aimAndShoot::getSolution, goalSelector::getSelected)
+                    .withVoltage(battery::getVolts);
+        }
+    }
+
+    @Override
     public void periodic() {
+        battery.update();
         telemetry.addData("Alliance", "%s   (B = red, X = blue)", alliance);
 
         if (opModeInInit()) {
@@ -148,6 +175,7 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
             telemetry.addLine("LB = aim  |  RT = fire  |  Y = re-seed from vision");
             telemetry.addData("Goals", "%d configured, strategy %s",
                     ShootingConstants.GOALS.length, ShootingConstants.GOAL_STRATEGY);
+            battery.addTelemetry(telemetry);
             return;
         }
 
@@ -168,6 +196,12 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
         }
         shooter.addTelemetry(telemetry);
         drive.addTelemetry(telemetry);
+        battery.addTelemetry(telemetry);
+        addLoopTelemetry();
+        if (recorder != null) {
+            recorder.record();
+            recorder.getLog().addTelemetry(telemetry);
+        }
     }
 
     @Override
@@ -175,5 +209,8 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
         shooter.stop();
         drive.stop();
         drive.getLocalization().stop();
+        if (recorder != null) {
+            recorder.close();
+        }
     }
 }

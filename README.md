@@ -608,6 +608,10 @@ All paths relative to `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/`.
 | `lib/command/Trigger.java` | Condition → command bindings. |
 | `lib/command/*CommandGroup.java` | Sequential, parallel, race, deadline. |
 | `lib/util/InterpolatingDoubleTreeMap.java` | Linear lookup table, clamped at the ends. |
+| `lib/util/LoopTimer.java` | Measures the loop rate the gains were tuned at. Mean, worst, tail, overruns. |
+| `lib/util/BatteryMonitor.java` | Polls voltage on an interval (a bus read is not free), warns on low and sag. |
+| `logging/MatchLog.java` | Bounded lock-free ring + background writer. The loop never waits for storage. |
+| `logging/MatchRecorder.java` | The schema: pose, drift, velocity, vision, aim, flywheel, one row per loop. |
 
 ### OpModes
 

@@ -27,6 +27,8 @@ import org.firstinspires.ftc.teamcode.lib.command.Commands;
 import org.firstinspires.ftc.teamcode.lib.geometry.Pose2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
 import org.firstinspires.ftc.teamcode.lib.geometry.Translation2d;
+import org.firstinspires.ftc.teamcode.lib.util.BatteryMonitor;
+import org.firstinspires.ftc.teamcode.logging.MatchRecorder;
 import org.firstinspires.ftc.teamcode.pathing.Alliance;
 import org.firstinspires.ftc.teamcode.pathing.AllianceFlip;
 import org.firstinspires.ftc.teamcode.pathing.BezierCurve;
@@ -47,10 +49,15 @@ public class ShootOnTheMoveAuto extends CommandOpMode {
     /** Starting pose in absolute field coordinates, for AUTHORED_FOR. */
     private static final Pose2d START = new Pose2d(-48, -48, Rotation2d.fromDegrees(45));
 
+    /** See ShootOnTheMoveTeleOp: a per-loop CSV of what the robot believed. */
+    private static final boolean RECORD_MATCH = true;
+
     private DriveSubsystem drive;
     private ShooterSubsystem shooter;
     private AimAtGoalHeading aim;
     private FollowPathAndShootCommand routine;
+    private MatchRecorder recorder;
+    private BatteryMonitor battery;
 
     private Alliance alliance = AUTHORED_FOR;
     private Alliance seededFor = null;
@@ -60,6 +67,7 @@ public class ShootOnTheMoveAuto extends CommandOpMode {
         drive = new DriveSubsystem(hardwareMap);
         shooter = new ShooterSubsystem(hardwareMap);
         register(drive, shooter);
+        battery = BatteryMonitor.from(hardwareMap);
 
         whenPressed(() -> gamepad1.b && opModeInInit(),
                 Commands.runOnce(() -> alliance = Alliance.RED));
@@ -73,6 +81,7 @@ public class ShootOnTheMoveAuto extends CommandOpMode {
 
     @Override
     public void periodic() {
+        battery.update();
         if (opModeInInit()) {
             // Seed on alliance selection, not after start, so the camera can check
             // the seed while the robot sits still. Re-seed only when the choice
@@ -91,6 +100,7 @@ public class ShootOnTheMoveAuto extends CommandOpMode {
                 telemetry.addLine("*** Vision disagrees with the seeded heading ***");
                 telemetry.addLine("Check the alliance and which way the robot faces.");
             }
+            battery.addTelemetry(telemetry);
             return;
         }
 
@@ -100,6 +110,12 @@ public class ShootOnTheMoveAuto extends CommandOpMode {
         }
         shooter.addTelemetry(telemetry);
         drive.addTelemetry(telemetry);
+        battery.addTelemetry(telemetry);
+        addLoopTelemetry();
+        if (recorder != null) {
+            recorder.record();
+            recorder.getLog().addTelemetry(telemetry);
+        }
     }
 
     @Override
@@ -112,6 +128,13 @@ public class ShootOnTheMoveAuto extends CommandOpMode {
         PathChain plan = AllianceFlip.forAlliance(buildPlan(), AUTHORED_FOR, alliance);
         routine = new FollowPathAndShootCommand(drive, shooter, plan, aim);
         schedule(routine);
+
+        if (RECORD_MATCH) {
+            recorder = new MatchRecorder("auto", drive, getLoopTimer())
+                    .withShooter(shooter)
+                    .withAim(aim::getLastSolution, aim::getLastGoal)
+                    .withVoltage(battery::getVolts);
+        }
     }
 
     /** The route, in AUTHORED_FOR's coordinates. */
@@ -155,5 +178,8 @@ public class ShootOnTheMoveAuto extends CommandOpMode {
         shooter.stop();
         drive.stop();
         drive.getLocalization().stop();
+        if (recorder != null) {
+            recorder.close();
+        }
     }
 }

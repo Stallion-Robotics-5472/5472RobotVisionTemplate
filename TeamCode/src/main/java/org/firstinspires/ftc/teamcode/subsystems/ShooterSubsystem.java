@@ -20,6 +20,7 @@ import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.teamcode.lib.command.SubsystemBase;
 import org.firstinspires.ftc.teamcode.shooting.ShooterMap;
 import org.firstinspires.ftc.teamcode.shooting.ShooterSetpoint;
+import org.firstinspires.ftc.teamcode.lib.util.RobotClock;
 import org.firstinspires.ftc.teamcode.shooting.ShootingConstants;
 
 public class ShooterSubsystem extends SubsystemBase {
@@ -42,6 +43,13 @@ public class ShooterSubsystem extends SubsystemBase {
 
     /** When true the map is bypassed so setpoints can be dialled in by hand. */
     private boolean manualMode = false;
+
+    // Shortfall tracking: a flywheel that cannot reach the speed it was asked for
+    // is the failure that looks like bad aim. The shot leaves short, the solution
+    // and the pose were both fine, and nothing in the logs says why -- unless the
+    // shooter itself notices it never got there and says so.
+    private double setpointChangedAt = Double.NEGATIVE_INFINITY;
+    private double worstShortfallRpm = 0.0;
 
     public ShooterSubsystem(HardwareMap hardwareMap) {
         this(hardwareMap, ShootingConstants.SHOT_MAP);
@@ -139,6 +147,12 @@ public class ShooterSubsystem extends SubsystemBase {
     }
 
     public void setFlywheelRpm(double rpm) {
+        // Only a change bigger than the tolerance restarts the clock. Tracking a
+        // slowly changing distance nudges the setpoint every loop, and treating
+        // each nudge as a new target would reset the grace period forever.
+        if (Math.abs(rpm - flywheelSetpointRpm) > ShootingConstants.FLYWHEEL_TOLERANCE_RPM) {
+            setpointChangedAt = RobotClock.nowSeconds();
+        }
         flywheelSetpointRpm = rpm;
         double ticks = rpmToTicksPerSecond(rpm);
         flywheel.setVelocity(ticks);
@@ -216,6 +230,54 @@ public class ShooterSubsystem extends SubsystemBase {
                         < ShootingConstants.FLYWHEEL_TOLERANCE_RPM;
     }
 
+    /**
+     * True when the flywheel has been asked for a speed it is not reaching.
+     *
+     * Distinct from "spinning up": the grace period has already passed and the
+     * wheel is still short. Causes, in order of likelihood: a low battery, a shot
+     * table whose far end asks for more than the motor can hold, a slipping belt,
+     * or FLYWHEEL_F set too low to hold speed under load.
+     *
+     * Only reports being SHORT. A wheel running fast is a different problem and not
+     * one that quietly shortens shots.
+     */
+    public boolean isStruggling() {
+        if (flywheelSetpointRpm <= 0) {
+            return false;
+        }
+        if (RobotClock.nowSeconds() - setpointChangedAt
+                < ShootingConstants.FLYWHEEL_SPINUP_GRACE_SECONDS) {
+            return false;       // still fairly entitled to be spinning up
+        }
+        return flywheelSetpointRpm - getFlywheelRpm()
+                > ShootingConstants.FLYWHEEL_TOLERANCE_RPM;
+    }
+
+    /** How far short the flywheel is right now, rpm. Zero or negative when fine. */
+    public double getShortfallRpm() {
+        return flywheelSetpointRpm <= 0 ? 0.0 : flywheelSetpointRpm - getFlywheelRpm();
+    }
+
+    /** The worst shortfall seen since the last {@link #clearShortfallRecord()}. */
+    public double getWorstShortfallRpm() {
+        return worstShortfallRpm;
+    }
+
+    public void clearShortfallRecord() {
+        worstShortfallRpm = 0.0;
+    }
+
+    /**
+     * Updates the shortfall record. Called from {@link #addTelemetry}, and worth
+     * calling once per loop from a subsystem periodic if you want the record to
+     * cover loops where telemetry was not drawn.
+     */
+    public void trackShortfall() {
+        if (isStruggling()) {
+            worstShortfallRpm = Math.max(worstShortfallRpm, getShortfallRpm());
+        }
+    }
+
     // ---------------------------------------------------------------------
     // Trim and manual mode, for tuning
     // ---------------------------------------------------------------------
@@ -262,8 +324,17 @@ public class ShooterSubsystem extends SubsystemBase {
     // ---------------------------------------------------------------------
 
     public void addTelemetry(Telemetry telemetry) {
+        trackShortfall();
         telemetry.addData("Flywheel", "%.0f / %.0f rpm  %s",
                 getFlywheelRpm(), flywheelSetpointRpm, atSpeed() ? "AT SPEED" : "spinning");
+        if (isStruggling()) {
+            telemetry.addLine(String.format(
+                    "*** FLYWHEEL %.0f RPM SHORT - check battery, or the far end of"
+                            + " the shot table is beyond it ***", getShortfallRpm()));
+        } else if (worstShortfallRpm > 0.0) {
+            telemetry.addData("Flywheel was short by", "%.0f rpm earlier",
+                    worstShortfallRpm);
+        }
         telemetry.addData("Hood", "%.1f deg", hoodSetpointDeg);
         telemetry.addData("Feeder", "%.2f", feederPower);
         if (rpmTrim != 0.0 || hoodTrimDeg != 0.0) {

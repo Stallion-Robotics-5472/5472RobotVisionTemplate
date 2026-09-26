@@ -259,6 +259,17 @@ public final class ShootingConstants {
     public static final double FLYWHEEL_TOLERANCE_RPM = 75.0;
 
     /**
+     * How long the flywheel is allowed to take to reach a new setpoint before the
+     * shooter reports it as struggling, in seconds.
+     *
+     * Set this from the spin-up time the "Drivetrain Characterization" OpMode
+     * measures, plus a margin. Too short and every ordinary spin-up looks like a
+     * fault; too long and a flywheel that genuinely cannot reach the far end of the
+     * shot table goes unreported all match.
+     */
+    public static final double FLYWHEEL_SPINUP_GRACE_SECONDS = 2.5;
+
+    /**
      * Speed the flywheel holds while waiting for a shot, rpm. Keeping it spinning
      * means the next shot only has to make up a small difference instead of
      * spinning up from nothing.

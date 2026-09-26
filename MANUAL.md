@@ -846,3 +846,73 @@ Errors  cross 0.42 in  heading 1.8 deg
 | `remaining` | inches of arc left; drives the deceleration feedforward |
 | `cross` | distance off the path. Should stay under an inch or two |
 | `heading` | heading error. Should trend to zero, never grow |
+
+### Loop rate, battery, and the match log
+
+The two command-based OpModes print three more lines, and write a CSV.
+
+```
+Loop           12.4 ms (81 Hz), worst 24.1
+Battery        12.62 V (low 12.08 V this run)
+Match log      1043 rows, queue 3/4096 (peak 11)
+```
+
+| Line | Read it for |
+|---|---|
+| `Loop` | the rate every control gain here was tuned at. If the mean climbs past 20 ms, something added to the loop is costing real time |
+| `Loop overruns` | only shown when there are some. A few is normal; a steady fraction means the loop is genuinely too slow, and the 95th percentile is the honest number |
+| `Loop stalls` | gaps over 250 ms — a garbage collection pause or a blocking call. Not a slow loop, a frozen one |
+| `Battery` | the voltage, and the lowest it dipped to under load |
+| `Match log` | rows recorded, and how far behind storage is. `DROPPED` means the log has holes in it |
+
+**The match log** is a CSV in `/sdcard/FIRST/matchlogs/`, one row per loop, named
+by OpMode and timestamp. Pull it off with `adb pull /sdcard/FIRST/matchlogs` or
+the Driver Station's file manager, and open it in a spreadsheet or plot it.
+
+It holds everything a shot depends on: the fused pose *and* the raw odometry pose
+(the gap between them is drift), velocity as well as position (the moving-shot
+correction scales with velocity), the effective and standing shot distance, and
+each readiness gate separately — `in_range`, `aimed`, `at_speed`,
+`heading_trusted` — because knowing *which* gate was shut is the whole diagnosis.
+`t` is seconds since the OpMode started, so two logs from one match line up on it.
+
+Three things about how it is built, because they are the difference between a
+diagnostic and a liability:
+
+- The control loop never waits for storage. It copies numbers into a
+  pre-allocated ring buffer — no file access, no formatting, no allocation — and a
+  low-priority background thread does the writing. Measured at about 5 µs per row,
+  or 0.03% of a 20 ms loop.
+- When storage cannot keep up, rows are **dropped and counted**, never queued
+  without limit and never blocked on. `DROPPED` in the telemetry is how you know a
+  log is incomplete rather than assuming it is whole.
+- A storage failure — no permission, full disk, missing path — turns logging off
+  and prints why. It never throws into your OpMode. An OpMode must not fail to run
+  because logging failed.
+
+The oldest logs are deleted once there are more than 25, so the device does not
+silently fill up.
+
+Set `RECORD_MATCH = false` at the top of the OpMode to turn it off.
+
+**The flywheel shortfall warning** is worth knowing about before you see it:
+
+```
+*** FLYWHEEL 210 RPM SHORT - check battery, or the far end of the shot table is beyond it ***
+```
+
+This is the failure that looks exactly like bad aim: the pose was right, the
+solution was right, the shot left short. It appears only after
+`FLYWHEEL_SPINUP_GRACE_SECONDS` has passed, so an ordinary spin-up does not
+trigger it. In order of likelihood: a low battery, a shot table whose far end asks
+for more than the motor can hold (the flywheel test in **Drivetrain
+Characterization** tells you which), a slipping belt, or `FLYWHEEL_F` too low to
+hold speed under load.
+
+Note what the code deliberately does *not* do: it does not scale the flywheel
+setpoint by voltage. The flywheel runs closed-loop — `setVelocity` plus the
+controller's PIDF holds rpm — and holding rpm against a falling battery is that
+loop's entire job. Multiplying the setpoint by a voltage ratio would compensate
+twice and make the commanded rpm wrong. The shot table stays in rpm and stays
+honest; the battery is reported so you can read a bad match correctly.
+

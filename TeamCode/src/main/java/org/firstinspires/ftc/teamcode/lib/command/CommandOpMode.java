@@ -26,11 +26,25 @@ package org.firstinspires.ftc.teamcode.lib.command;
 
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 
+import org.firstinspires.ftc.teamcode.lib.util.LoopTimer;
+
 import java.util.function.BooleanSupplier;
 
 public abstract class CommandOpMode extends LinearOpMode {
 
     private final CommandScheduler scheduler = new CommandScheduler();
+
+    /**
+     * Measures the loop rate for free.
+     *
+     * Every gain in this template was tuned at some loop rate, and nothing
+     * otherwise warns you when that rate changes. Add a per-loop String.format
+     * here and an inline file flush there and 50 Hz quietly becomes 15 Hz -- the
+     * heading PID damps less, the follower brakes later, the shot solution is
+     * stale. Cheap enough to always run: a few doubles per loop, formatted only
+     * when {@link #addLoopTelemetry()} asks.
+     */
+    private final LoopTimer loopTimer = new LoopTimer();
 
     /** Build subsystems, default commands and bindings here. */
     public abstract void configure();
@@ -67,9 +81,12 @@ public abstract class CommandOpMode extends LinearOpMode {
         }
 
         onStart();
+        // Init can sit for minutes; those gaps say nothing about the loop rate.
+        loopTimer.reset();
 
         try {
             while (opModeIsActive()) {
+                loopTimer.tick();
                 scheduler.run();
                 periodic();
                 telemetry.update();
@@ -88,6 +105,16 @@ public abstract class CommandOpMode extends LinearOpMode {
 
     public CommandScheduler getScheduler() {
         return scheduler;
+    }
+
+    /** Loop timing for this run. Reset at the start of the active period. */
+    public LoopTimer getLoopTimer() {
+        return loopTimer;
+    }
+
+    /** Adds the loop rate to telemetry. Call it from {@link #periodic()}. */
+    public void addLoopTelemetry() {
+        loopTimer.addTelemetry(telemetry);
     }
 
     public void register(Subsystem... subsystems) {

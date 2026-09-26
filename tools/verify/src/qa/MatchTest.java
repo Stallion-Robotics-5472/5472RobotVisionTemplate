@@ -574,6 +574,127 @@ public class MatchTest {
             sim.releaseClock();
         }
 
+        System.out.println("\n=== Scenario: recording a whole match to disk ===");
+        {
+            // The claim under test: logging every important number, every loop, for a
+            // whole match costs the control loop essentially nothing -- and the log
+            // that comes out is complete, not full of holes.
+            Pose2d truth = new Pose2d(-40, -20, Rotation2d.fromDegrees(60));
+            MatchSim sim = new MatchSim(truth, buildGoals());
+            sim.seedOdometry(truth);
+
+            CommandScheduler scheduler = new CommandScheduler();
+            scheduler.registerSubsystem(sim.drive, sim.shooter);
+
+            org.firstinspires.ftc.teamcode.shooting.AimAtGoalHeading aim =
+                    new org.firstinspires.ftc.teamcode.shooting.AimAtGoalHeading(
+                            sim.goalSelector, () -> Alliance.RED,
+                            sim.localization::getVisibleTagIds);
+            org.firstinspires.ftc.teamcode.pathing.Path leg =
+                    new org.firstinspires.ftc.teamcode.pathing.Path(
+                            new org.firstinspires.ftc.teamcode.pathing.BezierCurve(
+                                    new Translation2d(-40, -20),
+                                    new Translation2d(-14, 4),
+                                    new Translation2d(14, 6),
+                                    new Translation2d(34, -6)))
+                            .setHeadingSource(aim);
+            org.firstinspires.ftc.teamcode.commands.FollowPathAndShootCommand routine =
+                    new org.firstinspires.ftc.teamcode.commands.FollowPathAndShootCommand(
+                            sim.drive, sim.shooter,
+                            new org.firstinspires.ftc.teamcode.pathing.PathChain(leg), aim);
+            scheduler.schedule(routine);
+
+            java.io.File dir;
+            try {
+                dir = java.nio.file.Files.createTempDirectory("matchrec").toFile();
+            } catch (java.io.IOException e) {
+                throw new RuntimeException(e);
+            }
+            org.firstinspires.ftc.teamcode.logging.MatchRecorder recorder =
+                    new org.firstinspires.ftc.teamcode.logging.MatchRecorder(
+                            dir, "sim", sim.drive)
+                            .withShooter(sim.shooter)
+                            .withAim(aim::getLastSolution, aim::getLastGoal)
+                            .withVoltage(() -> 12.4);
+
+            int loops = 0;
+            long recordNanos = 0;
+            long loopNanos = 0;
+            long worstRecordNanos = 0;
+            while (scheduler.isScheduled(routine) && loops < 1500) {
+                long loopStart = System.nanoTime();
+                sim.tick(Alliance.RED);
+                scheduler.run();
+                long beforeRecord = System.nanoTime();
+                recorder.record();
+                long after = System.nanoTime();
+                recordNanos += after - beforeRecord;
+                worstRecordNanos = Math.max(worstRecordNanos, after - beforeRecord);
+                loopNanos += after - loopStart;
+                loops++;
+            }
+            recorder.close();
+
+            double perRowMicros = recordNanos / 1000.0 / loops;
+            System.out.printf("   %d loops recorded; %.2f us per row (worst %.2f us),"
+                            + " %.2f%% of the robot's own loop work%n",
+                    loops, perRowMicros, worstRecordNanos / 1000.0,
+                    100.0 * recordNanos / loopNanos);
+            System.out.printf("   %.4f%% of a 20 ms loop budget; queue peaked at %d"
+                            + " of %d rows%n",
+                    perRowMicros / 200.0, recorder.getLog().getPeakQueueDepth(),
+                    recorder.getLog().getCapacity());
+
+            check("recording a whole match drops nothing",
+                    recorder.getLog().getRowsDropped() == 0,
+                    recorder.getLog().getRowsDropped() + " rows dropped");
+            check("one row per loop, no more and no fewer",
+                    recorder.getLog().getRowsWritten() == loops,
+                    recorder.getLog().getRowsWritten() + " rows for " + loops + " loops");
+            check("a row costs under 1% of the loop budget",
+                    perRowMicros < 200.0,
+                    String.format("%.1f us per row", perRowMicros));
+            check("no single row ever costs a whole loop",
+                    worstRecordNanos < 20_000_000L,
+                    String.format("worst row took %.2f ms", worstRecordNanos / 1e6));
+            check("logging is not turned off by a failure",
+                    recorder.getLog().getError() == null,
+                    "" + recorder.getLog().getError());
+
+            // And the file has to be readable, with the numbers the robot actually had.
+            try {
+                java.util.List<String> lines = java.nio.file.Files.readAllLines(
+                        recorder.getLog().getFile().toPath());
+                check("every row reached the file",
+                        lines.size() == loops + 1,
+                        lines.size() + " lines for " + loops + " rows");
+                String[] header = lines.get(0).split(",", -1);
+                check("the header matches the schema",
+                        header.length
+                                == org.firstinspires.ftc.teamcode.logging.MatchRecorder
+                                        .COLUMNS.length,
+                        header.length + " columns in the file");
+                String[] last = lines.get(lines.size() - 1).split(",", -1);
+                check("every column is present on every row",
+                        last.length == header.length,
+                        last.length + " cells on the last row");
+                int xColumn = java.util.Arrays.asList(
+                        org.firstinspires.ftc.teamcode.logging.MatchRecorder.COLUMNS)
+                        .indexOf("x");
+                double loggedX = Double.parseDouble(last[xColumn]);
+                System.out.printf("   last logged x %.3f, estimator says %.3f%n",
+                        loggedX, sim.localization.getPose().getX());
+                check("the log holds what the robot believed, not a stale copy",
+                        Math.abs(loggedX - sim.localization.getPose().getX()) < 0.01,
+                        String.format("%.3f vs %.3f", loggedX,
+                                sim.localization.getPose().getX()));
+            } catch (java.io.IOException e) {
+                check("the log file is readable", false, e.toString());
+            }
+            scheduler.reset();
+            sim.releaseClock();
+        }
+
         System.out.println(fails == 0
                 ? String.format("%nBoth matches completed cleanly.%s",
                         warnings > 0 ? " (" + warnings + " warning(s))" : "")

@@ -413,6 +413,30 @@ Telemetry shows `Vision source: MegaTag2 | heading TRUSTED`.
 | `jump NN in` | too far from a settled estimate |
 | `vision disabled` | `VISION_ENABLED = false` |
 
+| Line | Watch for |
+|---|---|
+| `Loop 12.4 ms (81 Hz)` | mean past 20 ms means something added to the loop costs real time |
+| `Loop overruns` | only printed when non-zero; the 95th percentile is the honest number |
+| `Loop stalls` | gaps over 250 ms — frozen, not slow |
+| `Battery 12.6 V (low 12.1)` | the dip under load, not the resting voltage |
+| `Match log ... DROPPED` | the CSV has holes; storage could not keep up |
+| `FLYWHEEL nnn RPM SHORT` | looks like bad aim, is not: battery, or the shot table's far end is beyond the motor |
+
+---
+
+## Match logs
+
+CSV per loop in `/sdcard/FIRST/matchlogs/`, from both Shoot On The Move OpModes.
+`adb pull /sdcard/FIRST/matchlogs`. One row per loop, ~5 µs to write (0.03% of a
+20 ms loop); the loop never waits for storage, and rows are dropped and counted
+rather than blocking. Oldest 25+ logs auto-deleted. `RECORD_MATCH = false` at the
+top of the OpMode turns it off.
+
+Columns worth knowing: `x,y,heading_deg` (fused) against `odo_x,odo_y` (drift is
+the gap), `vx,vy,omega_dps`, `vision_ok,tags,heading_trusted`, `shot_dist_in` vs
+`stand_dist_in`, and the gates separately — `in_range`, `aimed`, `at_speed`.
+Knowing which gate was shut is the diagnosis.
+
 ---
 
 ## Shoot-on-the-move gotchas
