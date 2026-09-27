@@ -57,6 +57,30 @@ public class MatchTest {
                         .radius(9.0).map(LOW_MAP).build());
     }
 
+    /**
+     * How far the shooter is physically pointed away from the goal, in the TRUTH
+     * frame, in degrees.
+     *
+     * Every other aim check in this file measures the error the robot believes it
+     * has, which is near zero even when the robot is pointed at a wall. For the
+     * camera-relative scenario that is exactly the thing under test, so this
+     * measures where the shooter is really pointing against where the goal really
+     * is. Only meaningful on a near-stationary robot, where the moving-shot lead is
+     * negligible.
+     */
+    static double trueAimErrorDeg(MatchSim sim, Translation2d goal) {
+        Translation2d shooterOffset = new Translation2d(
+                ShootingConstants.SHOOTER_FORWARD_OFFSET_IN,
+                ShootingConstants.SHOOTER_LEFT_OFFSET_IN);
+        Translation2d shooter = sim.truePose.getTranslation()
+                .plus(shooterOffset.rotateBy(sim.truePose.getRotation()));
+        Translation2d toGoal = goal.minus(shooter);
+        double want = Math.atan2(toGoal.getY(), toGoal.getX());
+        double have = sim.truePose.getHeading()
+                + Math.toRadians(ShootingConstants.SHOOTER_YAW_OFFSET_DEG);
+        return Math.toDegrees(Math.abs(MatchSim.wrap(want - have)));
+    }
+
     /** Where the robot starts, authored for red. */
     static final Pose2d RED_START = new Pose2d(-48.0, -48.0, Rotation2d.fromDegrees(45));
 
@@ -404,6 +428,115 @@ public class MatchTest {
             check("re-seeding from vision recovers the heading",
                     reseeded && sim.headingErrorDeg() < 5.0,
                     String.format("still %.1f deg off", sim.headingErrorDeg()));
+            scheduler.reset();
+            sim.releaseClock();
+        }
+
+        System.out.println("\n=== Scenario: no field map, so no botpose at all ===");
+        {
+            // The situation: the Limelight sees tags perfectly well but has no field
+            // map uploaded (or last season's), so it publishes no botpose. The
+            // estimator then never corrects the odometry and never vouches for the
+            // heading -- and the robot here was seeded wrong on top of that.
+            //
+            // This is what aiming at what the camera SEES is for. The goal table
+            // cannot work: it subtracts a wrong pose from a field coordinate. The
+            // camera-relative mode does not care, because it never uses the pose.
+            Pose2d truth = new Pose2d(-36, 0, Rotation2d.fromDegrees(75));
+            Translation2d hive = buildGoals().get(0).getAuthoredPosition();
+
+            // --- first, the goal table, which must refuse ---
+            MatchSim tableSim = new MatchSim(truth, buildGoals());
+            tableSim.botposeAvailable = false;
+            tableSim.seedOdometry(new Pose2d(-6, 20, Rotation2d.fromDegrees(120)));
+
+            CommandScheduler tableScheduler = new CommandScheduler();
+            tableScheduler.registerSubsystem(tableSim.drive, tableSim.shooter);
+            AimAndShootCommand tableAim = new AimAndShootCommand(
+                    tableSim.drive, tableSim.shooter, () -> 0.0, () -> 0.0,
+                    () -> Alliance.RED, () -> true, true, tableSim.goalSelector);
+            tableScheduler.schedule(tableAim);
+
+            int tableFired = 0;
+            boolean tagsWereSeen = false;
+            for (int i = 0; i < 200; i++) {
+                tableSim.tick(Alliance.RED);
+                tableScheduler.run();
+                if (!tableSim.localization.getFiducials().isEmpty()) tagsWereSeen = true;
+                if (tableSim.feeder.power > 0.5) tableFired++;
+            }
+            System.out.printf("   goal table: fired %d, heading %s, pose error %.0f in%n",
+                    tableFired,
+                    tableSim.localization.isHeadingTrusted() ? "TRUSTED" : "untrusted",
+                    tableSim.poseError());
+            check("tags are seen even with no botpose", tagsWereSeen,
+                    "the camera saw nothing, so this scenario proves nothing");
+            check("without a botpose the heading is never trusted",
+                    !tableSim.localization.isHeadingTrusted(),
+                    "trust was granted with no field-relative fix");
+            check("the goal table refuses to shoot on an uncorrected pose",
+                    tableFired == 0,
+                    tableFired + " frames fired at wherever it guessed the goal was");
+            tableScheduler.reset();
+            tableSim.releaseClock();
+
+            // --- now the camera-relative mode, which must shoot, and hit ---
+            MatchSim sim = new MatchSim(truth, buildGoals());
+            sim.botposeAvailable = false;
+            sim.seedOdometry(new Pose2d(-6, 20, Rotation2d.fromDegrees(120)));
+
+            CommandScheduler scheduler = new CommandScheduler();
+            scheduler.registerSubsystem(sim.drive, sim.shooter);
+            org.firstinspires.ftc.teamcode.shooting.VisionTargetSource seen =
+                    new org.firstinspires.ftc.teamcode.shooting.VisionTargetSource(
+                            sim.visionTargetConfig(), sim.localization::getFiducials);
+            AimAndShootCommand aim = new AimAndShootCommand(
+                    sim.drive, sim.shooter, () -> 0.0, () -> 0.0,
+                    () -> Alliance.RED, () -> true, true, seen);
+            scheduler.schedule(aim);
+
+            int fired = 0;
+            double worstTrueAimErrorAtFire = 0.0;
+            double worstRangeError = 0.0;
+            double worstPoseError = 0.0;
+            // The shot's own tolerance, which is what "aimed" means: it comes from
+            // the goal's opening at this distance. Comparing the true aim error
+            // against a made-up threshold instead would be measuring the threshold.
+            double toleranceAtFire = 0.0;
+            for (int i = 0; i < 200; i++) {
+                sim.tick(Alliance.RED);
+                scheduler.run();
+                worstPoseError = Math.max(worstPoseError, sim.poseError());
+                if (sim.feeder.power > 0.5) {
+                    fired++;
+                    worstTrueAimErrorAtFire = Math.max(worstTrueAimErrorAtFire,
+                            trueAimErrorDeg(sim, hive));
+                    worstRangeError = Math.max(worstRangeError,
+                            Math.abs(seen.getRangeInches()
+                                    - hive.getDistance(sim.truePose.getTranslation())));
+                    toleranceAtFire = Math.toDegrees(
+                            aim.getSolution().headingToleranceRadians);
+                }
+            }
+            System.out.printf("   camera-relative: fired %d, worst TRUE aim error at"
+                            + " fire %.2f deg (tolerance %.2f), range error %.2f in%n",
+                    fired, worstTrueAimErrorAtFire, toleranceAtFire, worstRangeError);
+            System.out.printf("   meanwhile the pose estimate was wrong by up to"
+                    + " %.0f in the whole time%n", worstPoseError);
+
+            check("it shoots with no botpose and a badly wrong pose", fired > 0,
+                    "never fired: " + aim.getStatus());
+            check("the pose really was wrong throughout", worstPoseError > 20.0,
+                    String.format("only %.1f in off, so nothing was proven",
+                            worstPoseError));
+            check("the range it measures matches the truth",
+                    worstRangeError < 1.0,
+                    String.format("%.2f in out", worstRangeError));
+            check("and it is REALLY pointed at the goal, not just in its own frame",
+                    fired > 0 && worstTrueAimErrorAtFire <= toleranceAtFire,
+                    String.format("fired %.2f deg off in the real world, outside its"
+                            + " own %.2f deg tolerance",
+                            worstTrueAimErrorAtFire, toleranceAtFire));
             scheduler.reset();
             sim.releaseClock();
         }

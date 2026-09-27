@@ -2,6 +2,7 @@ package qa;
 
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
 import com.qualcomm.hardware.limelightvision.LLResult;
+import com.qualcomm.hardware.limelightvision.LLResultTypes;
 import com.qualcomm.hardware.limelightvision.Limelight3A;
 import com.qualcomm.robotcore.hardware.BasicMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
@@ -59,6 +60,15 @@ public class MatchSim {
     static final double MAX_OMEGA_RAD_S = 6.0;           // rad/sec at full turn power
     static final double CAMERA_FOV_DEG = 27.0;           // half-angle, Limelight-ish
     static final double CAMERA_RANGE_IN = 110.0;
+
+    // Camera and target geometry, so the sim can produce the per-tag bearing and
+    // elevation that camera-relative aiming ranges off. These are the numbers a
+    // team measures with a tape; the sim picks plausible ones and hands the same
+    // ones to VisionTargetSource via visionTargetConfig(), so a sign or unit error
+    // in either the sim or the source shows up as a missed shot.
+    static final double SIM_CAMERA_HEIGHT_IN = 12.0;
+    static final double SIM_TARGET_HEIGHT_IN = 44.0;
+    static final double SIM_CAMERA_ELEVATION_DEG = 18.0;
     static final double ODOMETRY_DRIFT_IN_PER_S = 0.35;  // slow, realistic creep
     static final double ROBOT_HALF_WIDTH_IN = 9.0;       // an 18" robot
 
@@ -77,6 +87,16 @@ public class MatchSim {
 
     /** When false the camera reports nothing, simulating a vision dropout. */
     boolean cameraWorking = true;
+
+    /**
+     * When false the camera still detects tags but publishes no botpose.
+     *
+     * The real situation this models: no field map uploaded to the Limelight, or a
+     * field map for the wrong season. Tags are seen, bearings and elevations are
+     * fine, but there is no field-relative pose solve -- so the estimator never
+     * corrects the odometry and never vouches for the heading.
+     */
+    boolean botposeAvailable = true;
 
     // ---- hardware stubs ----
     final HardwareMap map = new HardwareMap();
@@ -235,6 +255,8 @@ public class MatchSim {
         LLResult result = new LLResult();
         List<Integer> seen = new ArrayList<>();
 
+        List<LLResultTypes.FiducialResult> fiducials = new ArrayList<>();
+
         for (Goal goal : cameraWorking ? goals : new ArrayList<Goal>()) {
             Translation2d position = GoalSelector.positionFor(goal, alliance);
             Translation2d toGoal = position.minus(truePose.getTranslation());
@@ -245,10 +267,27 @@ public class MatchSim {
             // Is the goal within the camera's cone? The camera looks along the
             // robot's heading plus the shooter's yaw offset.
             double bearing = Math.atan2(toGoal.getY(), toGoal.getX());
-            double off = Math.abs(wrap(bearing - truePose.getHeading()
-                    - Math.toRadians(ShootingConstants.SHOOTER_YAW_OFFSET_DEG)));
+            double signedOff = wrap(bearing - truePose.getHeading()
+                    - Math.toRadians(ShootingConstants.SHOOTER_YAW_OFFSET_DEG));
+            double off = Math.abs(signedOff);
             if (off <= Math.toRadians(CAMERA_FOV_DEG)) {
                 seen.addAll(goal.getTagIds());
+
+                // Per-tag measurements, in the camera's own conventions: tx is
+                // positive when the target is to the RIGHT (so it is the negation of
+                // a CCW-positive bearing), ty is positive UP and is measured from
+                // the boresight, so the camera's own elevation comes out of it.
+                double txDegrees = -Math.toDegrees(signedOff);
+                double elevation = Math.toDegrees(Math.atan2(
+                        SIM_TARGET_HEIGHT_IN - SIM_CAMERA_HEIGHT_IN, distance));
+                double tyDegrees = elevation - SIM_CAMERA_ELEVATION_DEG;
+                // Apparent size falls off with distance squared, which is what makes
+                // it usable for picking the nearest of several tags.
+                double area = 400.0 / (distance * distance);
+                for (int id : goal.getTagIds()) {
+                    fiducials.add(new LLResultTypes.FiducialResult(
+                            id, txDegrees, tyDegrees, area));
+                }
             }
         }
 
@@ -278,14 +317,42 @@ public class MatchSim {
                     VisionConstants.BOTPOSE_AVG_DIST_UNIT.fromInches(nearestIn);
             // A good fix: botpose is the true pose. Odometry drift is the error
             // source here, and vision is what should be removing it.
-            Pose3D pose = new Pose3D(truePose.getX(), truePose.getY(), truePose.getHeading());
-            result.botpose = pose;
-            result.botposeMt2 = pose;
-            for (int id : seen) {
-                result.withTags(id);
+            if (botposeAvailable) {
+                Pose3D pose = new Pose3D(
+                        truePose.getX(), truePose.getY(), truePose.getHeading());
+                result.botpose = pose;
+                result.botposeMt2 = pose;
+            } else {
+                result.botpose = null;
+                result.botposeMt2 = null;
             }
+            result.fiducials = fiducials;
         }
         camera.nextResult = result;
+    }
+
+    /**
+     * A VisionTargetSource config that matches this sim's camera geometry.
+     *
+     * Deliberately not ShootingConstants.configFromConstants(): those heights ship
+     * at zero so the mode stays inert until a team measures them, which is right on
+     * a robot and useless in a test.
+     */
+    org.firstinspires.ftc.teamcode.shooting.VisionTargetSource.Config visionTargetConfig() {
+        java.util.Set<Integer> ids = new java.util.HashSet<>();
+        for (Goal goal : goals) {
+            ids.addAll(goal.getTagIds());
+        }
+        return new org.firstinspires.ftc.teamcode.shooting.VisionTargetSource.Config(
+                SIM_CAMERA_HEIGHT_IN,
+                SIM_TARGET_HEIGHT_IN,
+                Math.toRadians(SIM_CAMERA_ELEVATION_DEG),
+                ShootingConstants.VISION_TARGET_TX_SIGN,
+                goals.get(0).getMap(),
+                goals.get(0).getRadiusInches(),
+                ShootingConstants.VISION_TARGET_HOLD_SECONDS,
+                ids,
+                ShootingConstants.VISION_TARGET_SWITCH_FRAMES);
     }
 
     /** One full robot loop: time, physics, vision. Caller then runs the code. */

@@ -76,6 +76,33 @@ refused to shoot on). When a result is surprising, suspect the harness too.
 - `PathConstants.HEADING_CORRECTION_SIGN` is `+1.0`. It was `-1.0` once, which is
   positive feedback: autonomous never finished.
 
+## Two targeting modes, not one
+
+Aiming goes through `TargetSource`. `GoalTargetSource` aims at a field coordinate
+from the table and so needs both the coordinates and the pose to be right;
+`VisionTargetSource` ranges off the camera frame and needs neither, but can only
+shoot at what it can see. `SwitchableTargetSource` runs both.
+
+Two consequences worth knowing before touching any of it:
+
+- The pose-trust gate is **per source**, via `requiresTrustedPose()`. It is not a
+  blanket safety check that got loosened: the camera-relative answer does not take
+  the pose as an input, so there is nothing for the pose to be wrong about, and
+  gating it would refuse correct shots in exactly the situation that mode exists
+  for. In `AUTO` the gate follows whichever source actually answered that loop.
+- `VisionTargetSource` ships **inert**. `CAMERA_LENS_HEIGHT_IN` and
+  `TARGET_CENTER_HEIGHT_IN` are zero, `isUsable()` is false, and `AUTO` therefore
+  behaves as `GOAL_TABLE` until a team measures them. Do not give them
+  plausible-looking defaults: a default height is a wrong answer nobody checks. The
+  same reasoning covers the refusals for a near-zero height difference, a mis-signed
+  camera pitch, and an implausible range.
+
+`VISION_TARGET_TX_SIGN` is the only convention here that could not be verified
+offline (Limelight's `tx` is positive-right; this codebase is CCW-positive, so it is
+`-1.0`). It is a named constant for the same reason `HEADING_CORRECTION_SIGN` is.
+`getTargetPoseRobotSpace()` is deliberately unused: its axis convention could not be
+confirmed, and an axis guess is a silent 90-degree aiming error.
+
 ## Constants you must not invent
 
 `ShootingConstants.TAG_FIELD_POSES` and `GOALS` are **placeholders that were made

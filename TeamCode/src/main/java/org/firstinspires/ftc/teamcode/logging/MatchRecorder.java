@@ -43,6 +43,7 @@ import org.firstinspires.ftc.teamcode.lib.util.RobotClock;
 import org.firstinspires.ftc.teamcode.shooting.AimSolution;
 import org.firstinspires.ftc.teamcode.shooting.Goal;
 import org.firstinspires.ftc.teamcode.shooting.ShootingConstants;
+import org.firstinspires.ftc.teamcode.shooting.TargetSource;
 import org.firstinspires.ftc.teamcode.subsystems.DriveSubsystem;
 import org.firstinspires.ftc.teamcode.subsystems.Localization;
 import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem;
@@ -77,6 +78,7 @@ public class MatchRecorder {
             "tag_dist_bad",         // the distance reading itself looked implausible
 
             "goal",                 // index into ShootingConstants.GOALS, -1 unknown
+            "target_fresh",         // 1 measured this loop, 0 a held measurement
             "shot_dist_in",         // effective (moving) distance the solution used
             "stand_dist_in",        // straight-line distance, for comparison
             "target_heading_deg",
@@ -110,18 +112,19 @@ public class MatchRecorder {
     private static final int I_DISAGREE = 18;
     private static final int I_TAG_DIST_BAD = 19;
     private static final int I_GOAL = 20;
-    private static final int I_SHOT_DIST = 21;
-    private static final int I_STAND_DIST = 22;
-    private static final int I_TARGET_HEADING = 23;
-    private static final int I_HEADING_ERR = 24;
-    private static final int I_HEADING_TOL = 25;
-    private static final int I_IN_RANGE = 26;
-    private static final int I_AIMED = 27;
-    private static final int I_FLY_SET = 28;
-    private static final int I_FLY_RPM = 29;
-    private static final int I_AT_SPEED = 30;
-    private static final int I_HOOD = 31;
-    private static final int I_VOLTS = 32;
+    private static final int I_TARGET_FRESH = 21;
+    private static final int I_SHOT_DIST = 22;
+    private static final int I_STAND_DIST = 23;
+    private static final int I_TARGET_HEADING = 24;
+    private static final int I_HEADING_ERR = 25;
+    private static final int I_HEADING_TOL = 26;
+    private static final int I_IN_RANGE = 27;
+    private static final int I_AIMED = 28;
+    private static final int I_FLY_SET = 29;
+    private static final int I_FLY_RPM = 30;
+    private static final int I_AT_SPEED = 31;
+    private static final int I_HOOD = 32;
+    private static final int I_VOLTS = 33;
 
     private final MatchLog log;
     private final LoopTimer loopTimer;
@@ -132,6 +135,7 @@ public class MatchRecorder {
     private ShooterSubsystem shooter;
     private Supplier<AimSolution> solutionSource;
     private Supplier<Goal> goalSource;
+    private Supplier<TargetSource.Target> targetSource;
     private Supplier<Double> voltageSource;
 
     public MatchRecorder(String label, DriveSubsystem drive) {
@@ -187,6 +191,23 @@ public class MatchRecorder {
                                  Supplier<Goal> goalSource) {
         this.solutionSource = solutionSource;
         this.goalSource = goalSource;
+        return this;
+    }
+
+    /**
+     * As {@link #withAim}, for a command that may be aiming at something other than
+     * a configured goal -- a camera target, say.
+     *
+     * The {@code goal} column is then -1, which is the honest answer: the thing
+     * being shot at is not one of the goals in the table. {@code target_fresh}
+     * distinguishes a measurement taken this loop from one being held after the
+     * target left frame, which is the difference between "the camera saw it" and
+     * "the robot is going from memory".
+     */
+    public MatchRecorder withTarget(Supplier<AimSolution> solutionSource,
+                                    Supplier<TargetSource.Target> targetSource) {
+        this.solutionSource = solutionSource;
+        this.targetSource = targetSource;
         return this;
     }
 
@@ -248,6 +269,13 @@ public class MatchRecorder {
         if (goalSource != null) {
             row[I_GOAL] = goalIndex(goalSource.get());
         }
+        if (targetSource != null) {
+            TargetSource.Target aimedAt = targetSource.get();
+            if (aimedAt != null) {
+                row[I_GOAL] = goalIndexByName(aimedAt.name);
+                row[I_TARGET_FRESH] = flag(aimedAt.measuredThisLoop);
+            }
+        }
         if (solutionSource != null) {
             AimSolution solution = solutionSource.get();
             if (solution != null) {
@@ -283,11 +311,12 @@ public class MatchRecorder {
 
     /** The goal's index in the shipped list, or -1 if it is not one of them. */
     private static double goalIndex(Goal goal) {
-        if (goal == null) {
-            return -1.0;
-        }
+        return goal == null ? -1.0 : goalIndexByName(goal.getName());
+    }
+
+    private static double goalIndexByName(String name) {
         for (int i = 0; i < ShootingConstants.GOALS.length; i++) {
-            if (ShootingConstants.GOALS[i].getName().equals(goal.getName())) {
+            if (ShootingConstants.GOALS[i].getName().equals(name)) {
                 return i;
             }
         }

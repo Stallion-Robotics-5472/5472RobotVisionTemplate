@@ -16,6 +16,7 @@
  *   back              re-zero driver-forward to the robot's current facing
  *   A                 cycle the target goal (pins it; overrides auto-select)
  *   left stick button hand goal choice back to automatic selection
+ *   START             cycle AIMING MODE: goal table / camera target / auto
  *   dpad up/down      trim flywheel rpm  +/- 50
  *   dpad left/right   trim hood angle    -/+ 0.5 deg
  *   X                 clear trim
@@ -39,7 +40,10 @@ import org.firstinspires.ftc.teamcode.lib.geometry.Rotation2d;
 import org.firstinspires.ftc.teamcode.logging.MatchRecorder;
 import org.firstinspires.ftc.teamcode.pathing.Alliance;
 import org.firstinspires.ftc.teamcode.shooting.GoalSelector;
+import org.firstinspires.ftc.teamcode.shooting.GoalTargetSource;
 import org.firstinspires.ftc.teamcode.shooting.ShootingConstants;
+import org.firstinspires.ftc.teamcode.shooting.SwitchableTargetSource;
+import org.firstinspires.ftc.teamcode.shooting.VisionTargetSource;
 import org.firstinspires.ftc.teamcode.subsystems.DriveSubsystem;
 import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem;
 
@@ -63,6 +67,20 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
      */
     private static final boolean RECORD_MATCH = true;
 
+    /**
+     * Which way aiming works when the OpMode starts. START cycles it in a match.
+     *
+     * AUTO is the sensible default: range off the camera when it can see the target,
+     * fall back to the goal table when it cannot. See SwitchableTargetSource.
+     *
+     * Note that camera-relative aiming stays inert until
+     * ShootingConstants.CAMERA_LENS_HEIGHT_IN and TARGET_CENTER_HEIGHT_IN are
+     * measured -- until then AUTO behaves exactly like GOAL_TABLE and the telemetry
+     * says why.
+     */
+    private static final SwitchableTargetSource.Mode START_AIM_MODE =
+            SwitchableTargetSource.Mode.AUTO;
+
     private DriveSubsystem drive;
     private ShooterSubsystem shooter;
     private AimAndShootCommand aimAndShoot;
@@ -70,6 +88,7 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
 
     private MatchRecorder recorder;
     private BatteryMonitor battery;
+    private SwitchableTargetSource targeting;
 
     private Alliance alliance = Alliance.RED;
     private Rotation2d driverForwardOffset = new Rotation2d(0);
@@ -106,14 +125,27 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
         // The main event. Requires both subsystems, so it displaces both default
         // commands while held and they resume when released.
         goalSelector = ShootingConstants.newGoalSelector();
+        targeting = new SwitchableTargetSource(
+                new GoalTargetSource(goalSelector,
+                        drive.getLocalization()::getVisibleTagIds),
+                VisionTargetSource.fromConstants(
+                        drive.getLocalization()::getFiducials),
+                START_AIM_MODE);
         aimAndShoot = new AimAndShootCommand(
                 drive, shooter,
                 () -> -gamepad1.left_stick_y * (gamepad1.right_bumper ? SLOW_SCALE : 1.0),
                 () -> -gamepad1.left_stick_x * (gamepad1.right_bumper ? SLOW_SCALE : 1.0),
                 () -> alliance,
                 () -> gamepad1.right_trigger > 0.5,
-                goalSelector);
+                true,
+                targeting);
         whileHeld(() -> gamepad1.left_bumper, aimAndShoot);
+
+        // Flip how aiming decides where the target is. Worth having on a button: if
+        // the pose goes wrong mid-match, camera-relative aiming still works, and if
+        // the camera loses sight of the goal the table still does.
+        whenPressed(() -> gamepad1.start && !opModeInInit(),
+                Commands.runOnce(targeting::cycleMode));
 
         // Goal override. The selector normally picks by AprilTag visibility, but a
         // driver who can see the field knows things the camera does not.
@@ -154,7 +186,7 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
             // numbers the telemetry shows.
             recorder = new MatchRecorder("teleop", drive, getLoopTimer())
                     .withShooter(shooter)
-                    .withAim(aimAndShoot::getSolution, goalSelector::getSelected)
+                    .withTarget(aimAndShoot::getSolution, aimAndShoot::getTarget)
                     .withVoltage(battery::getVolts);
         }
     }
@@ -173,6 +205,7 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
             }
             telemetry.addLine();
             telemetry.addLine("LB = aim  |  RT = fire  |  Y = re-seed from vision");
+            telemetry.addData("Aim mode", "%s   (START cycles)", targeting.getMode());
             telemetry.addData("Goals", "%d configured, strategy %s",
                     ShootingConstants.GOALS.length, ShootingConstants.GOAL_STRATEGY);
             battery.addTelemetry(telemetry);
@@ -181,7 +214,8 @@ public class ShootOnTheMoveTeleOp extends CommandOpMode {
 
         telemetry.addData("Mode", getScheduler().isScheduled(aimAndShoot)
                 ? "AIMING" : "driver control");
-        telemetry.addData("Goal", goalSelector.describe());
+        telemetry.addData("Aim mode", "%s   (START cycles)", targeting.getMode());
+        telemetry.addData("Target", targeting.describe());
         telemetry.addData("Tags seen", drive.getLocalization().getVisibleTagIds().toString());
         if (getScheduler().isScheduled(aimAndShoot)) {
             telemetry.addData("Shot", aimAndShoot.getStatus());

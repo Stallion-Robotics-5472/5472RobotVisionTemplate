@@ -603,6 +603,68 @@ driving wherever you put it while rotating to lead the goal. Pull **RT** to fire
 If it will not fire, the telemetry `Shot` line names the blocker — range, aim,
 flywheel speed, or pose trust.
 
+### h. Aim at what the camera sees (optional, but do it)
+
+Everything above aims at a coordinate from [§12a](#a-the-goals--nothing-works-until-these-are-right)
+and subtracts the robot's own estimated position. That needs the goal coordinates
+*and* the pose to be right. There is a second mode that needs neither: it measures
+where the target is relative to the robot, straight off the camera frame.
+
+It is worth setting up even if you trust your goal coordinates, because it is the
+only thing that still works when:
+
+- you have not uploaded this season's field map to the Limelight, so there is no
+  botpose at all;
+- your goal coordinates are wrong (and note that the ones this template ships are
+  invented placeholders);
+- the robot was placed wrong, or nobody selected the alliance.
+
+**Measure three numbers.** That is the entire configuration.
+
+| Constant | Where | What it is |
+|---|---|---|
+| `CAMERA_LENS_HEIGHT_IN` | `ShootingConstants` | camera lens above the floor, inches |
+| `TARGET_CENTER_HEIGHT_IN` | `ShootingConstants` | the tag you are ranging off, above the floor |
+| `CAMERA_PITCH_OFFSET_DEG` | `VisionConstants` | camera tilt. **Positive tilts DOWN**, so a camera angled up to see tags is negative |
+
+Both heights ship at **zero**, and the mode stays inert until they are set — a
+plausible-looking default height would be a wrong answer nobody checks. Until then
+the aiming mode reads `AUTO` but behaves exactly like the goal table, and the
+telemetry `Target` line says why.
+
+Measure the tag height to the **centre of the tag**, not to the goal opening. The
+range is to the tag; the shot table already encodes how to get a piece from that
+range into the goal.
+
+**Then check the tx sign, on the robot, in thirty seconds.** Hold or place a tag to
+the **left** of where the camera is pointing, hold **LB**, and watch which way the
+robot turns. It should turn **left**, toward the tag. If it turns away, flip
+`VISION_TARGET_TX_SIGN` to `+1.0`. This is the one convention in the template that
+cannot be checked offline, which is why it is a named constant rather than a minus
+sign buried in the maths.
+
+**Fill in `VISION_TARGET_TAG_IDS`.** It defaults to the IDs in your tag table. These
+are IDs only — no positions — so unlike the coordinates they are cheap to get right,
+and they stop the robot ranging off a tag that is not a goal.
+
+**Using it.** Press **START** in a match to cycle the aiming mode:
+
+| Mode | Behaviour |
+|---|---|
+| `GOAL_TABLE` | always the coordinate table. Can track a goal the camera cannot see |
+| `VISION_TARGET` | always the camera. Refuses to shoot at anything not in frame |
+| `AUTO` | the camera when it can see the target, the table when it cannot. The default |
+
+The `Target` telemetry line says which one actually answered and, when there is no
+target, why not — unmeasured heights, no tag in frame, a tag that is not on the
+list, an impossible elevation, or an implausible range.
+
+One thing that is *not* a bug: in `VISION_TARGET` mode the robot will not fire at a
+goal it cannot see, and it will not demand a trusted pose either. Both are correct.
+The shot does not rest on the pose in that mode, so gating it on the pose would
+refuse a shot that is right — see [`SHOOTING.md`](TeamCode/src/main/java/org/firstinspires/ftc/teamcode/shooting/SHOOTING.md#the-other-way-aim-at-what-the-camera-sees)
+for the algebra.
+
 ---
 
 ## 13. Write command-based code
@@ -667,6 +729,9 @@ Before the first match:
 - [ ] Robot's start heading puts a goal tag in the camera's view, so the
       pre-match start-pose check can actually run.
 - [ ] `GOAL_TAG_MEANING` matches how the manual uses tags.
+- [ ] Camera and target heights measured, and the tx sign checked on the
+      robot ([§12h](#h-aim-at-what-the-camera-sees-optional-but-do-it)) — this is
+      what still works if the field map or the goal coordinates are wrong.
 - [ ] `SHOT_MAP` built from real shots, with **non-zero flight times**.
 - [ ] Shoot On The Move fires while driving, not just standing still.
 
@@ -874,6 +939,8 @@ It holds everything a shot depends on: the fused pose *and* the raw odometry pos
 correction scales with velocity), the effective and standing shot distance, and
 each readiness gate separately — `in_range`, `aimed`, `at_speed`,
 `heading_trusted` — because knowing *which* gate was shut is the whole diagnosis.
+`target_fresh` says whether the camera could see the target that loop or the robot
+was going from a held measurement.
 `t` is seconds since the OpMode started, so two logs from one match line up on it.
 
 Three things about how it is built, because they are the difference between a

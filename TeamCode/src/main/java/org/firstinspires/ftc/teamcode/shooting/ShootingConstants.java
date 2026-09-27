@@ -121,6 +121,82 @@ public final class ShootingConstants {
     public static final double GOAL_RADIUS_IN = 6.0;
 
     // =====================================================================
+    // 1b. AIMING AT WHAT THE CAMERA SEES  -- MEASURE THESE TWO HEIGHTS
+    // =====================================================================
+    /*
+     * The alternative to the goal table above: range the target off the camera
+     * frame instead of subtracting your own position from a configured coordinate.
+     *
+     * This needs no field coordinates and does not rest on the pose estimate being
+     * right -- see VisionTargetSource for why the pose cancels out. What it does
+     * need is two tape-measure numbers and the camera angle. Get them wrong and the
+     * distance is wrong, which is why the mode refuses to produce a target at all
+     * while they are still at their defaults.
+     */
+
+    /**
+     * Height of the CAMERA LENS above the floor, inches.
+     *
+     * Ships at zero, which is not a measurement -- the mode stays off until this
+     * and TARGET_CENTER_HEIGHT_IN are at least MIN_HEIGHT_DIFFERENCE_IN apart.
+     */
+    public static final double CAMERA_LENS_HEIGHT_IN = 0.0;
+
+    /**
+     * Height of the point you are aiming at above the floor, inches.
+     *
+     * The AprilTag's centre if you are ranging off the tag, which is the usual
+     * case. If the tag sits well below the opening you are shooting into, measure
+     * the tag -- the range is to the tag, and the shot table already encodes how to
+     * get a piece from that range into the goal.
+     */
+    public static final double TARGET_CENTER_HEIGHT_IN = 0.0;
+
+    /**
+     * Sign applied to the camera's tx before it is used as a bearing.
+     *
+     * Limelight reports tx positive when the target is to the RIGHT of the
+     * crosshair, and everything here is CCW-positive, so a target on the right is a
+     * negative bearing: -1.0. This is a constant rather than a buried minus sign
+     * because it is the one convention here that could not be checked offline.
+     *
+     * Thirty-second check on the robot: hold a tag to the LEFT of where the camera
+     * points and confirm the robot turns LEFT. If it turns away, flip this.
+     */
+    public static final double VISION_TARGET_TX_SIGN = -1.0;
+
+    /**
+     * How long a measurement keeps being used after the target leaves frame,
+     * seconds.
+     *
+     * A piece crossing in front of the lens, or the camera clipping the tag at the
+     * edge of frame, should not abandon a shot that was about to happen. Held as a
+     * field point, so aiming stays correct while the robot drives; that leans on
+     * odometry, which is worth a fraction of an inch over this window.
+     */
+    public static final double VISION_TARGET_HOLD_SECONDS = 0.5;
+
+    /**
+     * Tag IDs that count as a target, or empty for any tag in frame.
+     *
+     * Worth filling in even though this mode needs no field coordinates: it stops
+     * the robot ranging off a tag that is not a goal. These are IDs only -- no
+     * positions -- so unlike TAG_FIELD_POSES they are cheap to get right.
+     */
+    public static final java.util.Set<Integer> VISION_TARGET_TAG_IDS =
+            java.util.Collections.unmodifiableSet(
+                    new java.util.HashSet<>(TAG_FIELD_POSES.keySet()));
+
+    /**
+     * Frames a different tag must win before the tracked target switches.
+     *
+     * Same reason as GOAL_SWITCH_FRAMES: the target sets the whole chassis heading,
+     * so a flickering detection would swing the robot between two aims and it would
+     * never settle enough to shoot at either.
+     */
+    public static final int VISION_TARGET_SWITCH_FRAMES = 12;
+
+    // =====================================================================
     // 2. WHERE THE SHOOTER IS ON YOUR ROBOT  -- MEASURE THIS
     // =====================================================================
     /**

@@ -16,10 +16,17 @@
  *   - the flywheel is at speed,
  *   - the pose is trustworthy.
  *
- * That last one matters more than it sounds. Aiming is only as good as the pose,
- * and a pose seeded 180 degrees out looks perfectly healthy from the inside --
- * so this refuses to fire until vision has vouched for the heading. Without that
- * check a mis-seeded robot will confidently shoot at empty field.
+ * That last one matters more than it sounds. Aiming at a coordinate from the goal
+ * table is only as good as the pose, and a pose seeded 180 degrees out looks
+ * perfectly healthy from the inside -- so this refuses to fire until vision has
+ * vouched for the heading. Without that check a mis-seeded robot will confidently
+ * shoot at empty field.
+ *
+ * It is the TARGET SOURCE that decides whether that gate applies. A source that
+ * measures the target relative to the robot (VisionTargetSource) has no dependence
+ * on the field pose at all, so demanding a trusted pose would refuse a shot that is
+ * actually correct -- in exactly the situation that mode exists for. The two modes
+ * are otherwise identical from here down.
  */
 package org.firstinspires.ftc.teamcode.commands;
 
@@ -30,7 +37,9 @@ import org.firstinspires.ftc.teamcode.shooting.AimLogic;
 import org.firstinspires.ftc.teamcode.shooting.AimSolution;
 import org.firstinspires.ftc.teamcode.shooting.Goal;
 import org.firstinspires.ftc.teamcode.shooting.GoalSelector;
+import org.firstinspires.ftc.teamcode.shooting.GoalTargetSource;
 import org.firstinspires.ftc.teamcode.shooting.ShootingConstants;
+import org.firstinspires.ftc.teamcode.shooting.TargetSource;
 import org.firstinspires.ftc.teamcode.subsystems.DriveSubsystem;
 import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem;
 
@@ -49,10 +58,10 @@ public class AimAndShootCommand extends Command {
 
     /** When false, aim and spin up but never feed. */
     private final boolean allowFeed;
-    private final GoalSelector goalSelector;
+    private final TargetSource targetSource;
 
     private AimSolution solution;
-    private Goal targetGoal;
+    private TargetSource.Target target;
     private boolean lastReady = false;
 
     /**
@@ -86,7 +95,23 @@ public class AimAndShootCommand extends Command {
                               DoubleSupplier driverForward, DoubleSupplier driverLeft,
                               Supplier<Alliance> alliance, BooleanSupplier fireRequested,
                               boolean allowFeed, GoalSelector goalSelector) {
-        this.goalSelector = goalSelector;
+        this(drive, shooter, driverForward, driverLeft, alliance, fireRequested,
+                allowFeed, new GoalTargetSource(goalSelector,
+                        drive.getLocalization()::getVisibleTagIds));
+    }
+
+    /**
+     * The general form: any {@link TargetSource}.
+     *
+     * Pass a {@code VisionTargetSource} to shoot at whatever the camera is looking
+     * at instead of at a goal from the table -- no goal coordinates, and no reliance
+     * on the field pose being right.
+     */
+    public AimAndShootCommand(DriveSubsystem drive, ShooterSubsystem shooter,
+                              DoubleSupplier driverForward, DoubleSupplier driverLeft,
+                              Supplier<Alliance> alliance, BooleanSupplier fireRequested,
+                              boolean allowFeed, TargetSource targetSource) {
+        this.targetSource = targetSource;
         this.drive = drive;
         this.shooter = shooter;
         this.driverForward = driverForward;
@@ -101,6 +126,7 @@ public class AimAndShootCommand extends Command {
     @Override
     public void initialize() {
         drive.resetHeadingController();
+        targetSource.reset();
         lastReady = false;
     }
 
@@ -108,34 +134,47 @@ public class AimAndShootCommand extends Command {
     public void execute() {
         Alliance playing = alliance.get();
 
-        // Which goal to shoot at. The selector prefers goals the camera can
-        // identify by their AprilTags, and will not switch on a single flickering
-        // frame -- on a turretless robot a switch moves the whole chassis.
-        targetGoal = goalSelector.update(
+        // What to shoot at. A goal source prefers goals the camera can identify and
+        // will not switch on a single flickering frame -- on a turretless robot a
+        // switch moves the whole chassis. A vision source ranges off the frame.
+        target = targetSource.update(
                 drive.getPose(), drive.getFieldVelocity(), drive.getAngularVelocity(),
-                drive.getLocalization().getVisibleTagIds(), playing);
-        Translation2d goal = GoalSelector.positionFor(targetGoal, playing);
+                playing);
+
+        Translation2d fieldVector = new Translation2d(
+                driverForward.getAsDouble(), driverLeft.getAsDouble())
+                .rotateBy(playing.driverForward());
+
+        if (target == null) {
+            // Nothing to shoot at: hand heading back to nobody in particular and
+            // keep driving. Holding the stale aim would point the robot at wherever
+            // the target used to be, which is worse than not aiming.
+            solution = null;
+            drive.driveFieldCentric(fieldVector.getX(), fieldVector.getY(), 0.0);
+            shooter.idle();
+            shooter.stopFeeder();
+            lastReady = false;
+            targetSource.freeze(false);
+            return;
+        }
 
         solution = AimLogic.calculate(
                 drive.getPose(),
                 drive.getFieldVelocity(),
                 drive.getAngularVelocity(),
-                goal,
-                targetGoal.getMap(),
-                // This goal's opening may be a different size from the default.
-                ShootingConstants.AIM_CONFIG.withGoalRadius(targetGoal.getRadiusInches()));
+                target.fieldPosition,
+                target.map,
+                // This target's opening may be a different size from the default.
+                ShootingConstants.AIM_CONFIG.withGoalRadius(target.radiusInches));
 
         // Driver keeps translation; the solution owns heading. The feedforward is
         // what lets the robot track a sweeping aim instead of trailing it.
-        Translation2d fieldVector = new Translation2d(
-                driverForward.getAsDouble(), driverLeft.getAsDouble())
-                .rotateBy(playing.driverForward());
         drive.driveWithHeadingLock(fieldVector.getX(), fieldVector.getY(),
                 solution.targetHeadingRadians, solution.headingFeedforwardRadPerSec);
 
         // Spin up for the EFFECTIVE distance -- the distance the shot actually
         // has to cover given the robot's motion, not the straight-line distance.
-        shooter.setShotFrom(targetGoal.getMap(), solution.effectiveDistanceInches);
+        shooter.setShotFrom(target.map, solution.effectiveDistanceInches);
 
         lastReady = isReadyToFire();
         boolean feeding = allowFeed && lastReady && fireRequested.getAsBoolean();
@@ -146,7 +185,7 @@ public class AimAndShootCommand extends Command {
         }
 
         // Never let the target change out from under a shot in progress.
-        goalSelector.freeze(feeding);
+        targetSource.freeze(feeding);
     }
 
     /** Every condition that must hold before a piece is fed. */
@@ -162,13 +201,19 @@ public class AimAndShootCommand extends Command {
     /**
      * Whether the pose can be trusted enough to shoot on.
      *
-     * With vision enabled this demands that MegaTag1 has vouched for the heading,
-     * which is what catches a robot seeded backwards. With vision disabled the
-     * check cannot be made, so it passes and the shot rests on the seeded pose --
-     * as it must, since there is nothing else to go on.
+     * With a goal-table source and vision enabled this demands that MegaTag1 (which
+     * is solved without the gyro) has vouched for the heading, which is what catches
+     * a robot seeded backwards. With vision disabled the check cannot be made, so it
+     * passes and the shot rests on the seeded pose -- as it must, since there is
+     * nothing else to go on.
+     *
+     * A source that does not need the pose is not gated on it. That is not a
+     * loosened check: the pose is not an input to that answer, so there is nothing
+     * for it to be wrong about.
      */
     private boolean isPoseTrustworthy() {
-        return !drive.getLocalization().isVisionEnabled()
+        return !targetSource.requiresTrustedPose()
+                || !drive.getLocalization().isVisionEnabled()
                 || drive.getLocalization().isHeadingTrusted();
     }
 
@@ -177,16 +222,32 @@ public class AimAndShootCommand extends Command {
         shooter.stopFeeder();
         shooter.idle();
         drive.stop();
-        goalSelector.freeze(false);
+        targetSource.freeze(false);
     }
 
-    /** The goal being aimed at. Null before the first loop. */
+    /** What is being aimed at, or null when there is nothing to shoot at. */
+    public TargetSource.Target getTarget() {
+        return target;
+    }
+
+    public TargetSource getTargetSource() {
+        return targetSource;
+    }
+
+    /**
+     * The goal being aimed at, or null when the source is not a goal table.
+     *
+     * Kept for the goal-table path, which is what most OpModes use.
+     */
     public Goal getTargetGoal() {
-        return targetGoal;
+        return targetSource instanceof GoalTargetSource
+                ? ((GoalTargetSource) targetSource).getLastGoal() : null;
     }
 
+    /** The goal selector, or null when the source is not a goal table. */
     public GoalSelector getGoalSelector() {
-        return goalSelector;
+        return targetSource instanceof GoalTargetSource
+                ? ((GoalTargetSource) targetSource).getGoalSelector() : null;
     }
 
     /** The most recent solution, for telemetry. Null before the first loop. */
@@ -201,11 +262,16 @@ public class AimAndShootCommand extends Command {
     /** One line describing what is blocking the shot, for telemetry. */
     public String getStatus() {
         if (solution == null) {
-            return "no solution yet";
+            String reason = targetSource.getRejectReason();
+            return reason == null ? "no solution yet" : "no target: " + reason;
         }
         if (!solution.inRange) {
             return String.format("%s out of range (%.0f in)",
-                    targetGoal.getName(), solution.effectiveDistanceInches);
+                    target.name, solution.effectiveDistanceInches);
+        }
+        if (!target.measuredThisLoop) {
+            return String.format("%s lost from frame %.2fs ago - holding aim",
+                    target.name, target.ageSeconds);
         }
         if (!isPoseTrustworthy()) {
             return "pose not trusted - vision has not vouched for the heading";

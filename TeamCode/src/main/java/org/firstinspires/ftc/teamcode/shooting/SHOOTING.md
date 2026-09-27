@@ -440,6 +440,143 @@ No need to change anything else.
 
 ---
 
+## The other way: aim at what the camera sees
+
+Everything above aims at a **field coordinate**. The robot looks up where the goal
+is, looks up where it thinks it is, and subtracts. That needs two things to be
+right — the goal coordinates and the pose estimate — and when either is wrong the
+robot aims at empty field with complete confidence. It is why the shoot commands
+refuse to fire until vision has vouched for the heading.
+
+The second mode does not use either. It measures where the target is **relative to
+the robot**, from the camera frame, every loop.
+
+| | `GOAL_TABLE` | `VISION_TARGET` |
+|---|---|---|
+| needs goal coordinates | **yes** | no |
+| needs a correct pose | **yes** | no |
+| needs the target in frame | no | **yes** |
+| can track a goal behind the robot | **yes** | no |
+| works with no field map on the Limelight | no | **yes** |
+| gated on `isHeadingTrusted()` | yes | no |
+
+Neither is better. They fail in opposite ways, which is why `AUTO` — range off the
+camera when it can see the target, fall back to the table when it cannot — is the
+default in `ShootOnTheMoveTeleOp`. **START** cycles the mode in a match.
+
+### Why the pose cancels out
+
+This looks like it should not work, so it is worth doing the algebra. The target's
+field position is computed as
+
+```
+targetField = robotPosition + rotate(relativeToRobot, heading)
+```
+
+and the aiming solution then wants the target relative to the shooter:
+
+```
+targetField - (robotPosition + rotate(robotToShooter, heading))
+        = rotate(relativeToRobot - robotToShooter, heading)
+```
+
+`robotPosition` drops out algebraically. A heading error `δ` shifts the computed
+target heading by `δ`, but the heading the controller *measures* is shifted by the
+same `δ`, so the robot physically points the right way. Velocity comes from the same
+odometry frame as everything else, so the virtual-goal correction stays consistent
+too. The whole calculation runs in whatever frame odometry happens to believe in,
+and the physical answer is right.
+
+The offline suite measures exactly this: the same camera frame described from four
+poses — including one displaced 24 in and rotated 180° — produces **0.000000°** of
+disagreement in the physical aim, while the goal table from that same pose aims
+152° away. And a full simulated match with **no botpose at all** and a pose 36 in
+wrong fires 168 times, ranges to within 0.00 in of the truth, and is genuinely
+pointed at the goal inside its own 6.88° tolerance.
+
+### What you must measure
+
+Two heights and a camera angle. That is the whole configuration — no field
+coordinates, which is the point.
+
+```java
+// ShootingConstants
+CAMERA_LENS_HEIGHT_IN  = 0.0;   // camera lens above the floor
+TARGET_CENTER_HEIGHT_IN = 0.0;  // the tag you are ranging off, above the floor
+// VisionConstants
+CAMERA_PITCH_OFFSET_DEG = 0.0;  // POSITIVE tilts DOWN, so a camera angled up is negative
+```
+
+Range comes out of the elevation angle:
+
+```
+horizontalDistance = (targetHeight - cameraHeight) / tan(cameraElevation + ty)
+```
+
+**Both heights ship at zero, and the mode stays inert until they are measured.**
+That is deliberate: a plausible-looking default height would be a wrong answer
+nobody checks. While they are unset, `AUTO` behaves exactly like `GOAL_TABLE` and
+the telemetry says why. The mode also refuses — rather than reporting a confident
+wrong distance — when the two heights are within 6 in of each other (the tangent
+divides by almost nothing, so a tenth of a degree of noise swings the answer by
+feet), when the camera pitch's sign makes the elevation impossible, and when the
+computed range lands outside 6–300 in.
+
+`VISION_TARGET_TX_SIGN` is `-1.0`: Limelight reports `tx` positive when the target
+is to the **right**, and this codebase is CCW-positive. It is a constant rather than
+a buried minus sign because it is the one convention here that could not be verified
+offline. **Thirty-second check on the robot:** hold a tag to the *left* of where the
+camera points and confirm the robot turns *left*. If it turns away, flip the sign.
+
+Why the elevation angle rather than the Limelight's own 3D tag pose
+(`getTargetPoseRobotSpace()`)? A single tag's pose solve is noisy and can flip
+orientation at range, while the elevation angle is one number off the sensor and
+degrades gracefully. And the axis convention of that 3D pose could not be confirmed
+offline — an axis guess is a silent 90° aiming error.
+
+### Using it
+
+```java
+TargetSource seen = VisionTargetSource.fromConstants(localization::getFiducials);
+
+// TeleOp
+new AimAndShootCommand(drive, shooter, forward, left, () -> alliance, fire, true, seen);
+
+// or on a path, exactly like AimAtGoalHeading
+AimAtTargetHeading aim = new AimAtTargetHeading(seen);
+Path leg = new Path(curve).setHeadingSource(aim);
+
+// or both, with the driver or the situation choosing
+SwitchableTargetSource targeting = new SwitchableTargetSource(
+        new GoalTargetSource(goalSelector, localization::getVisibleTagIds),
+        seen,
+        SwitchableTargetSource.Mode.AUTO);
+```
+
+Everything downstream is identical: the same virtual-goal solve, the same angular
+feedforward, the same readiness gates, the same heading source that lets a path aim
+while following. Only the answer to "where is it" changes.
+
+Two behaviours worth knowing:
+
+- **When the target leaves frame** the last measurement is held for
+  `VISION_TARGET_HOLD_SECONDS` (0.5 s), as a *field* point — so the robot keeps
+  aiming at the right place while it drives, on odometry, which is worth a fraction
+  of an inch over that window. A piece crossing the lens should not abandon a shot
+  that was about to happen. After that the shot is refused and the telemetry says so.
+- **The tracked tag is sticky.** A challenger must be the best candidate for
+  `VISION_TARGET_SWITCH_FRAMES` consecutive frames before it takes over, and the
+  target cannot change at all mid-shot. Same reason as `GOAL_SWITCH_FRAMES`: here
+  the target sets the whole chassis heading, so a flickering detection would swing
+  the robot between two aims and never settle on either.
+
+In `AUTO`, the pose-trust gate follows whichever source actually answered. While the
+camera is ranging, the shot does not depend on the pose and is not gated on it; the
+moment it falls back to the table, the gate comes back. Each shot is judged by what
+it actually rests on.
+
+---
+
 ## Alliances
 
 Goals are written for one alliance and flipped at run time. `GoalSelector` does it

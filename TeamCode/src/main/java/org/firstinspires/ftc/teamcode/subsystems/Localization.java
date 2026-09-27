@@ -30,6 +30,7 @@
 package org.firstinspires.ftc.teamcode.subsystems;
 
 import com.qualcomm.hardware.limelightvision.LLResult;
+import com.qualcomm.hardware.limelightvision.LLResultTypes;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
@@ -66,6 +67,15 @@ public class Localization implements Localizer, Follower.VelocityAware {
     private double lastAvgTagDist = 0.0;
     private String lastVisionSource = "none";
     private List<Integer> lastVisibleTagIds = Collections.emptyList();
+
+    /**
+     * The tags in the most recent frame, with their bearings and areas.
+     *
+     * Kept so aiming-at-what-the-camera-sees can use the frame the estimator
+     * already fetched this loop. Polling the Limelight a second time would be a
+     * second bus transaction for data we already have -- see LoopTimer.
+     */
+    private List<LLResultTypes.FiducialResult> lastFiducials = Collections.emptyList();
     private boolean avgTagDistanceImplausible = false;
 
     // Heading-trust gate. MegaTag2 is only used for position once MegaTag1 --
@@ -152,6 +162,7 @@ public class Localization implements Localizer, Follower.VelocityAware {
             lastVisionAccepted = false;
             lastVisionReject = "vision disabled";
             lastVisibleTagIds = Collections.emptyList();
+            lastFiducials = Collections.emptyList();
             return;
         }
 
@@ -168,6 +179,9 @@ public class Localization implements Localizer, Follower.VelocityAware {
         // solve is usable -- goal selection wants to know what the camera can
         // see even on a frame we reject for fusion.
         lastVisibleTagIds = LimelightVision.visibleTagIds(result);
+        lastFiducials = result == null || result.getFiducialResults() == null
+                ? Collections.<LLResultTypes.FiducialResult>emptyList()
+                : result.getFiducialResults();
 
         processVision(result, now);
     }
@@ -515,6 +529,17 @@ public class Localization implements Localizer, Follower.VelocityAware {
      */
     public List<Integer> getVisibleTagIds() {
         return lastVisibleTagIds;
+    }
+
+    /**
+     * The tag detections in the most recent frame -- id, bearing (tx), elevation
+     * (ty) and area -- or empty when there are none or vision is off.
+     *
+     * This is the raw per-tag measurement, which is what ranging off the camera
+     * needs; {@link #getVisibleTagIds()} is the same frame reduced to IDs.
+     */
+    public List<LLResultTypes.FiducialResult> getFiducials() {
+        return lastFiducials;
     }
 
     /** True if the given tag was in the most recent frame. */

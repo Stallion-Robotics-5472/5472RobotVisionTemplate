@@ -49,6 +49,7 @@ Heading `0` faces +X. `90°` faces +Y.
 | `X` / `B` *(init)* | select blue / red alliance |
 | `back` | re-zero field heading to current facing |
 | `Y` | re-seed whole pose from vision (MegaTag1; needs a fresh tag) |
+| `start` | cycle aiming mode: goal table / camera target / auto |
 
 **Drivetrain Direction Check** — hold each:
 
@@ -434,8 +435,37 @@ top of the OpMode turns it off.
 
 Columns worth knowing: `x,y,heading_deg` (fused) against `odo_x,odo_y` (drift is
 the gap), `vx,vy,omega_dps`, `vision_ok,tags,heading_trusted`, `shot_dist_in` vs
-`stand_dist_in`, and the gates separately — `in_range`, `aimed`, `at_speed`.
+`stand_dist_in`, `target_fresh` (did the camera see it this loop, or is the robot
+going from memory), and the gates separately — `in_range`, `aimed`, `at_speed`.
 Knowing which gate was shut is the diagnosis.
+
+---
+
+## Two ways to aim
+
+| | `GOAL_TABLE` | `VISION_TARGET` |
+|---|---|---|
+| needs goal coordinates | **yes** | no |
+| needs a correct pose | **yes** | no |
+| needs the target in frame | no | **yes** |
+| can track a goal behind the robot | **yes** | no |
+| works with no field map uploaded | no | **yes** |
+| gated on `isHeadingTrusted()` | yes | no |
+
+`AUTO` (the default) uses the camera when it can see the target and the table when it
+cannot; the pose gate follows whichever answered. **START** cycles the mode.
+
+Camera mode needs three measured numbers and nothing else — `CAMERA_LENS_HEIGHT_IN`,
+`TARGET_CENTER_HEIGHT_IN` (both `ShootingConstants`, both ship at 0 and keep the mode
+inert until set) and `CAMERA_PITCH_OFFSET_DEG` (`VisionConstants`, **positive tilts
+down**). Then check `VISION_TARGET_TX_SIGN` on the robot: a tag to the LEFT should
+make it turn LEFT.
+
+```java
+TargetSource seen = VisionTargetSource.fromConstants(localization::getFiducials);
+new AimAndShootCommand(drive, shooter, fwd, left, () -> alliance, fire, true, seen);
+Path leg = new Path(curve).setHeadingSource(new AimAtTargetHeading(seen));
+```
 
 ---
 

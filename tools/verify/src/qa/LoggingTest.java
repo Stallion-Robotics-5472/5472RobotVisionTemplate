@@ -410,7 +410,7 @@ public class LoggingTest {
                 "t", "x", "y", "heading_deg", "odo_x", "odo_y",
                 "vx", "vy", "omega_dps",
                 "vision_ok", "tags", "heading_trusted",
-                "shot_dist_in", "heading_err_deg", "in_range", "aimed",
+                "shot_dist_in", "heading_err_deg", "in_range", "aimed", "target_fresh",
                 "fly_set_rpm", "fly_rpm", "at_speed",
                 "loop_ms",
         };

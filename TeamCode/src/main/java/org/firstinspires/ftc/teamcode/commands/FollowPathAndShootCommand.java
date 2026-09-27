@@ -3,10 +3,16 @@
  *
  * The path decides where the robot GOES; the aiming solution decides where it
  * FACES. Both at once, which is only possible because heading comes from a
- * HeadingSource -- see AimAtGoalHeading.
+ * HeadingSource -- see AimAtTargetHeading.
+ *
+ * Works with either aiming mode. AimAtGoalHeading aims at a coordinate from the goal
+ * table, which can be a goal the camera cannot currently see -- usually what an
+ * autonomous wants. AimAtTargetHeading with a VisionTargetSource aims at whatever
+ * the camera is looking at instead, needing no goal coordinates and no reliance on
+ * the field pose; there the shot is refused whenever nothing is in frame.
  *
  *   AimAtGoalHeading aim = new AimAtGoalHeading(selector, () -> alliance,
- *           localization::getVisibleTagIds);
+ *           localization::getVisibleTagIds);        // or any AimAtTargetHeading
  *   PathChain chain = new PathChain(
  *           new Path(curve).setHeadingSource(aim)
  *                          .addMarker(PathMarker.atT(0.3, () -> {})));
@@ -20,8 +26,9 @@ package org.firstinspires.ftc.teamcode.commands;
 import org.firstinspires.ftc.teamcode.lib.command.Command;
 import org.firstinspires.ftc.teamcode.pathing.Follower;
 import org.firstinspires.ftc.teamcode.pathing.PathChain;
-import org.firstinspires.ftc.teamcode.shooting.AimAtGoalHeading;
+import org.firstinspires.ftc.teamcode.shooting.AimAtTargetHeading;
 import org.firstinspires.ftc.teamcode.shooting.AimSolution;
+import org.firstinspires.ftc.teamcode.shooting.TargetSource;
 import org.firstinspires.ftc.teamcode.subsystems.DriveSubsystem;
 import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem;
 
@@ -30,7 +37,7 @@ public class FollowPathAndShootCommand extends Command {
     private final DriveSubsystem drive;
     private final ShooterSubsystem shooter;
     private final PathChain chain;
-    private final AimAtGoalHeading aim;
+    private final AimAtTargetHeading aim;
     private final Follower follower;
     private final boolean feedWhenReady;
 
@@ -43,7 +50,7 @@ public class FollowPathAndShootCommand extends Command {
      *     solution the heading came from instead of solving twice.
      */
     public FollowPathAndShootCommand(DriveSubsystem drive, ShooterSubsystem shooter,
-                                     PathChain chain, AimAtGoalHeading aim) {
+                                     PathChain chain, AimAtTargetHeading aim) {
         this(drive, shooter, chain, aim, true);
     }
 
@@ -52,7 +59,7 @@ public class FollowPathAndShootCommand extends Command {
      *     leg that should arrive already up to speed without spending game pieces.
      */
     public FollowPathAndShootCommand(DriveSubsystem drive, ShooterSubsystem shooter,
-                                     PathChain chain, AimAtGoalHeading aim,
+                                     PathChain chain, AimAtTargetHeading aim,
                                      boolean feedWhenReady) {
         this.drive = drive;
         this.shooter = shooter;
@@ -84,14 +91,17 @@ public class FollowPathAndShootCommand extends Command {
 
         // Read back the solution the heading came from.
         AimSolution solution = aim.getLastSolution();
-        if (solution == null) {
-            // No path on this chain uses the aiming heading source, so there is no
-            // shot to prepare. Keep the shooter warm and just drive the route.
+        TargetSource.Target target = aim.getLastTarget();
+        if (solution == null || target == null) {
+            // Either no path on this chain uses the aiming heading source, or the
+            // source has nothing to shoot at. Either way there is no shot to
+            // prepare: keep the shooter warm and just drive the route.
+            shooter.stopFeeder();
             shooter.idle();
             return;
         }
 
-        shooter.setShotFrom(aim.getLastGoal().getMap(), solution.effectiveDistanceInches);
+        shooter.setShotFrom(target.map, solution.effectiveDistanceInches);
 
         boolean ready = solution.canShootFrom(drive.getPose().getHeading())
                 && shooter.atSpeed()
@@ -103,16 +113,18 @@ public class FollowPathAndShootCommand extends Command {
             shooter.stopFeeder();
         }
         // Do not let the target change out from under a shot in progress.
-        aim.getGoalSelector().freeze(feedWhenReady && ready);
+        aim.getTargetSource().freeze(feedWhenReady && ready);
     }
 
     /**
      * Same gate the TeleOp command uses: a pose seeded backwards looks perfectly
      * healthy from the inside, so refuse to fire until vision has vouched for the
-     * heading. With vision disabled the check cannot be made and passes.
+     * heading. With vision disabled the check cannot be made and passes, and a
+     * target source that does not depend on the pose is not gated on it at all.
      */
     private boolean isPoseTrustworthy() {
-        return !drive.getLocalization().isVisionEnabled()
+        return !aim.getTargetSource().requiresTrustedPose()
+                || !drive.getLocalization().isVisionEnabled()
                 || drive.getLocalization().isHeadingTrusted();
     }
 
@@ -127,7 +139,7 @@ public class FollowPathAndShootCommand extends Command {
         shooter.stopFeeder();
         shooter.idle();
         drive.stop();
-        aim.getGoalSelector().freeze(false);
+        aim.getTargetSource().freeze(false);
     }
 
     /** Loops spent feeding, as a rough proxy for shots taken. */
@@ -142,13 +154,18 @@ public class FollowPathAndShootCommand extends Command {
     /** One line describing what the command is doing, for telemetry. */
     public String getStatus() {
         AimSolution solution = aim.getLastSolution();
-        if (solution == null) {
-            return String.format("driving, seg %d (no aim source on this path)",
-                    follower.getPathIndex());
+        TargetSource.Target target = aim.getLastTarget();
+        if (solution == null || target == null) {
+            String reason = aim.getTargetSource().getRejectReason();
+            return reason != null
+                    ? String.format("seg %d, no target: %s",
+                            follower.getPathIndex(), reason)
+                    : String.format("driving, seg %d (no aim source on this path)",
+                            follower.getPathIndex());
         }
         if (!solution.inRange) {
             return String.format("seg %d, %s out of range (%.0f in)",
-                    follower.getPathIndex(), aim.getLastGoal().getName(),
+                    follower.getPathIndex(), target.name,
                     solution.effectiveDistanceInches);
         }
         if (!isPoseTrustworthy()) {

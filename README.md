@@ -594,6 +594,11 @@ All paths relative to `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/`.
 | `shooting/AimLogic.java` | The shoot-on-the-move maths. Pure static, no hardware. |
 | `shooting/AimSolution.java` | Its output: heading, feedforward, distance, readiness. |
 | `shooting/ShooterMap.java`, `ShooterSetpoint.java` | The shot table and one row of it. |
+| `shooting/TargetSource.java` | Where the thing being shot at is. Two answers, failing in opposite ways. |
+| `shooting/GoalTargetSource.java` | A goal from the table: needs the coordinates and the pose to be right. |
+| `shooting/VisionTargetSource.java` | Whatever the camera sees, ranged off the frame: needs neither. |
+| `shooting/SwitchableTargetSource.java` | Both, with the driver or the situation choosing. |
+| `shooting/AimAtTargetHeading.java` | Either source as a path heading, so a path can aim while following. |
 | `subsystems/ShooterSubsystem.java` | Flywheel, hood, feeder, driven from the table. |
 | `subsystems/DriveSubsystem.java` | The drivetrain as a subsystem, with heading-lock drive. |
 | `commands/AimAndShootCommand.java` | Ties it together and gates the feeder. |
