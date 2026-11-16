@@ -1,8 +1,8 @@
 /*
  * Autonomous template — "just plop in the path".
  *
- * Generate a path in the Path Planner (assets/pathplanner.html, or the robot's
- * IP at /pathplanner), copy the generated Java, and paste it into the marked
+ * Generate a path in the Path Planner (open PathPlanner.html from the repo root
+ * in any browser), copy the generated Java, and paste it into the marked
  * block below. The planner emits exactly:
  *
  *     localization.setStartingPose(new Pose2d(...));

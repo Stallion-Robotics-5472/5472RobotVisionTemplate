@@ -64,23 +64,16 @@ turns without oscillation.
 
 ## Path Planner (visual tool)
 
-`assets/pathplanner.html` is a self-contained visual editor. Drag control points
-on the field, choose a heading mode per segment, and copy the generated Java
-(`BezierCurve` / `Path` / `PathChain`) straight into an OpMode. The field
-convention matches the pose estimator: 144"×144", origin at center, +X right,
-+Y up, heading degrees CCW.
+**`PathPlanner.html` in the repo root** is a self-contained visual editor:
+double-click it to open it in any browser. It needs no robot, no server and no
+internet, so it also works at competitions. Drag control points on the field,
+choose a heading mode per path, and copy the generated Java (`BezierCurve` /
+`Path` / `PathChain`) straight into `PathAuto` between the PASTE markers. The
+field convention matches the pose estimator: 144"×144", origin at center, +X
+right, +Y up, heading degrees CCW.
 
-To use it:
-- **From the robot's IP** — `PathPlannerServer` registers a route on the Robot
-  Controller's embedded web server, so after deploying the app you can connect
-  to the robot's Wi-Fi and browse to:
-
-  ```
-  http://192.168.43.1:8080/pathplanner
-  ```
-
-  (Use the robot's actual IP; `192.168.43.1` is the typical Control Hub address.)
-  This relies on SDK web-server internals, so confirm it once on hardware after
-  the first deploy.
-- **Locally** — you can also just open `assets/pathplanner.html` in any browser;
-  it has no server dependency.
+- Each path's first point is linked to the end of the previous path (the first
+  path starts at the start pose), so the chain is always continuous.
+- The green square is the 18" robot at the start pose; the dashed one shows
+  where and which way the robot ends.
+- Paths save automatically in that browser.

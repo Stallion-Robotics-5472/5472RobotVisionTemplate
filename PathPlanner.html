@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FTC Path Planner</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!--
+  FTC Path Planner: a self-contained visual editor for the PathChain follower
+  (pathing/Follower). Drag control points on the field, choose a heading rule
+  per path, and copy the generated Java into PathAuto between the PASTE markers.
+
+  No external libraries or network access: open the file straight from the repo
+  in any browser (works offline at competitions).
+
+  Field convention matches the pose estimator: 144" x 144", origin at the field
+  center, +X to the right, +Y up, heading in degrees CCW from +X.
+-->
+<style>
+  /* Layout: square field canvas on the left, controls and generated Java on the right; stacks to one column under 920px. */
+  :root {
+    --bg: #eceee9;
+    --surface: #fbfbf9;
+    --ink: #1d2226;
+    --muted: #5b646b;
+    --line: #cdd2ca;
+    --mat: #d5d8d0;
+    --seam: #b4bab0;
+    --axis: #7f877d;
+    --path: #66717a;
+    --accent: #b25e0c;
+    --accent-ink: #ffffff;
+    --start: #1d7f47;
+    --danger: #a3332b;
+    --note: #f3e6d4;
+    --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #131619; --surface: #1b1f23; --ink: #e4e7ea; --muted: #9aa3ab; --line: #2d333a;
+      --mat: #23282d; --seam: #343b42; --axis: #59626b; --path: #7e8892;
+      --accent: #f0a043; --accent-ink: #1c1206; --start: #3fc27d; --danger: #f07a70; --note: #2c241a;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #131619; --surface: #1b1f23; --ink: #e4e7ea; --muted: #9aa3ab; --line: #2d333a;
+    --mat: #23282d; --seam: #343b42; --axis: #59626b; --path: #7e8892;
+    --accent: #f0a043; --accent-ink: #1c1206; --start: #3fc27d; --danger: #f07a70; --note: #2c241a;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.45 var(--font-ui);
+    padding-block: 20px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .app {
+    display: grid;
+    grid-template-columns: minmax(0, 720px) minmax(0, 460px);
+    grid-template-areas: "field head" "field side";
+    grid-template-rows: auto 1fr;
+    gap: 16px 24px;
+    justify-content: center;
+    align-items: start;
+  }
+  .app > header { grid-area: head; }
+  .field-col { grid-area: field; }
+  .side { grid-area: side; }
+  @media (max-width: 920px) {
+    .app { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "field" "side"; grid-template-rows: auto; }
+  }
+
+  .field-col { display: grid; gap: 8px; min-width: 0; }
+  canvas {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    aspect-ratio: 1 / 1;
+    height: auto;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  .field-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; color: var(--muted); font-size: 12px; }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .hint { margin: 0; color: var(--muted); font-size: 12px; max-width: 65ch; }
+
+  .side { display: grid; gap: 16px; min-width: 0; }
+  h1 { margin: 0; font-size: 20px; letter-spacing: -0.01em; text-wrap: balance; }
+  h2 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+  .sub { margin: 4px 0 0; color: var(--muted); }
+  .note { background: var(--note); border-radius: 4px; padding: 8px 10px; font-size: 13px; }
+
+  .group { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); min-width: 0; }
+  .group-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+  label { color: var(--muted); font-size: 12px; }
+  .pose label { display: inline-flex; align-items: center; gap: 6px; }
+
+  input, select, button, textarea { font: inherit; color: var(--ink); }
+  input, select {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 5px 7px; font-size: 13px;
+  }
+  input[type="number"] { width: 76px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  button {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px; font-size: 13px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button.danger { color: var(--danger); }
+  button.arm { background: var(--danger); border-color: var(--danger); color: var(--surface); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .paths { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .path { border: 1px solid var(--line); border-left-width: 3px; border-radius: 4px; padding: 8px 10px; display: grid; gap: 6px; background: var(--surface); }
+  .path.sel { border-left-color: var(--accent); }
+  .path-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .path-name { background: none; border: none; padding: 0; font-weight: 600; font-size: 14px; }
+  .path-meta { color: var(--muted); font-size: 12px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); font-size: 13px; }
+
+  textarea {
+    width: 100%; height: 260px; resize: vertical; background: var(--surface); border: 1px solid var(--line); border-radius: 4px;
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.5; padding: 8px; white-space: pre; overflow: auto;
+  }
+  .status { margin: 0; min-height: 1.4em; font-size: 12px; color: var(--muted); }
+  .small { margin: 0; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main class="app">
+  <header>
+    <h1>FTC Path Planner</h1>
+    <p class="sub">Builds a PathChain for the follower. Copy the Java and paste it into PathAuto between the PASTE markers.</p>
+  </header>
+
+  <section class="field-col" aria-label="Field">
+    <canvas id="field" aria-label="FTC field, 144 by 144 inches. Click to add a control point to the selected path."></canvas>
+    <div class="field-meta">
+      <span id="readout" class="mono">cursor: off field</span>
+      <span>24 in tiles · origin at center · +X right, +Y up · 18 in robot outline</span>
+    </div>
+    <p class="hint">Click the field to add a point to the selected path. Drag a point to move it, double-click to delete it.
+      Each path's first point is linked to the end of the path before it (the first path starts at the start pose), so the chain never jumps.</p>
+  </section>
+
+  <section class="side">
+    <p id="exampleNote" class="note" hidden>This is the example path from FollowPathExample. Edit it, or press Clear all to start fresh.</p>
+
+    <div class="group">
+      <h2>Start pose</h2>
+      <div class="row pose">
+        <label for="startX">x in <input id="startX" type="number" value="0" step="0.5"></label>
+        <label for="startY">y in <input id="startY" type="number" value="0" step="0.5"></label>
+        <label for="startH">heading° <input id="startH" type="number" value="0" step="5"></label>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-head">
+        <h2>Paths</h2>
+        <div class="row">
+          <button id="addPath" class="primary" type="button">Add path</button>
+          <button id="clearAll" type="button">Clear all</button>
+        </div>
+      </div>
+      <ol id="pathList" class="paths"></ol>
+    </div>
+
+    <div class="group">
+      <div class="group-head">
+        <h2>Generated Java</h2>
+        <button id="copyBtn" class="primary" type="button">Copy</button>
+      </div>
+      <p id="copyStatus" class="status" role="status"></p>
+      <textarea id="code" readonly spellcheck="false" aria-label="Generated Java"></textarea>
+      <p id="finalPose" class="small mono"></p>
+      <p class="small">Paths save automatically in this browser.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+// ---------- model ----------
+// Each path: { points: [{x,y}...], heading: {mode, a, b} }
+//   mode: "tangent" | "reverse" | "linear" | "constant"
+//   linear uses a = start°, b = end°; constant uses a = °; tangent/reverse ignore a, b.
+// points[0] of every path is linked: it always equals the start pose (path 0)
+// or the last point of the previous path.
+const STORE_KEY = "ftcPathPlanner.v2";
+const MODES = ["tangent", "reverse", "linear", "constant"];
+const FIELD = 144;          // inches
+const HALF = FIELD / 2;     // 72
+const ROBOT = 18;           // FTC robots start inside an 18 in cube
+const L = 720;              // logical canvas size (CSS scales it)
+const SCALE = L / FIELD;    // logical px per inch
+
+const $ = id => document.getElementById(id);
+const canvas = $("field");
+const ctx = canvas.getContext("2d");
+
+function examplePlan() {
+  return {
+    start: { x: 0, y: 0, h: 0 },
+    selected: 0,
+    example: true,
+    paths: [
+      { points: [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 10, y: 30 }, { x: 30, y: 30 }],
+        heading: { mode: "linear", a: 0, b: 90 } },
+      { points: [{ x: 30, y: 30 }, { x: 30, y: 50 }],
+        heading: { mode: "constant", a: 90, b: 0 } },
+    ],
+  };
+}
+
+let state = loadSaved() || examplePlan();
+
+// ---------- storage (best effort; the page works without it) ----------
+function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
+function sanitize(raw) {
+  if (!raw || typeof raw !== "object" || !Array.isArray(raw.paths)) return null;
+  const s = raw.start || {};
+  return {
+    start: { x: num(s.x, 0), y: num(s.y, 0), h: num(s.h, 0) },
+    selected: Math.max(0, Math.floor(num(raw.selected, 0))),
+    example: false,
+    paths: raw.paths.filter(p => p && Array.isArray(p.points)).map(p => ({
+      points: p.points.map(q => ({ x: num(q && q.x, 0), y: num(q && q.y, 0) })),
+      heading: {
+        mode: MODES.includes(p.heading && p.heading.mode) ? p.heading.mode : "tangent",
+        a: num(p.heading && p.heading.a, 0),
+        b: num(p.heading && p.heading.b, 0),
+      },
+    })),
+  };
+}
+function loadSaved() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY) || localStorage.getItem("ftcPathPlanner");
+    return raw ? sanitize(JSON.parse(raw)) : null;
+  } catch (e) { return null; }
+}
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* storage blocked */ }
+}
+
+// ---------- geometry ----------
+function toCanvas(p) { return { x: (p.x + HALF) * SCALE, y: (HALF - p.y) * SCALE }; }
+function toField(cx, cy) { return { x: cx / SCALE - HALF, y: HALF - cy / SCALE }; }
+function round1(v) { return Math.round(v * 10) / 10; }
+function clampField(v) { return Math.max(-HALF, Math.min(HALF, v)); }
+
+// Bezier (De Casteljau)
+function bezierPoint(points, t) {
+  let pts = points.map(p => ({ x: p.x, y: p.y }));
+  while (pts.length > 1) {
+    const next = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      next.push({ x: pts[i].x + (pts[i + 1].x - pts[i].x) * t,
+                  y: pts[i].y + (pts[i + 1].y - pts[i].y) * t });
+    }
+    pts = next;
+  }
+  return pts[0];
+}
+function bezierTangent(points, t) {
+  const n = points.length - 1;
+  if (n < 1) return { x: 1, y: 0 };
+  const d = [];
+  for (let i = 0; i < n; i++) d.push({ x: n * (points[i + 1].x - points[i].x), y: n * (points[i + 1].y - points[i].y) });
+  if (d.length === 1) return d[0];
+  return bezierPoint(d, t);
+}
+function shortest(deg) { return ((deg + 180) % 360 + 360) % 360 - 180; }
+function headingAt(path, t) {
+  const h = path.heading;
+  if (h.mode === "constant") return h.a;
+  if (h.mode === "linear") return h.a + shortest(h.b - h.a) * t;
+  const tan = bezierTangent(path.points, t);
+  let deg = Math.atan2(tan.y, tan.x) * 180 / Math.PI;
+  if (h.mode === "reverse") deg += 180;
+  return shortest(deg);
+}
+function pathLength(path) {
+  if (path.points.length < 2) return 0;
+  let len = 0, prev = bezierPoint(path.points, 0);
+  for (let s = 1; s <= 100; s++) {
+    const p = bezierPoint(path.points, s / 100);
+    len += Math.hypot(p.x - prev.x, p.y - prev.y);
+    prev = p;
+  }
+  return len;
+}
+
+// Keep the chain continuous: each path starts where the previous one ends.
+function anchorFor(pi) {
+  for (let i = pi - 1; i >= 0; i--) {
+    const pts = state.paths[i].points;
+    if (pts.length) return pts[pts.length - 1];
+  }
+  return { x: state.start.x, y: state.start.y };
+}
+function link() {
+  state.paths.forEach((path, pi) => {
+    const a = anchorFor(pi);
+    if (!path.points.length) path.points.push({ x: a.x, y: a.y });
+    else path.points[0] = { x: a.x, y: a.y };
+  });
+  if (state.selected >= state.paths.length) state.selected = Math.max(0, state.paths.length - 1);
+}
+
+// ---------- drawing ----------
+const TOKENS = ["--mat", "--seam", "--axis", "--path", "--accent", "--start", "--surface", "--muted", "--ink"];
+let colors = {};
+function readColors() {
+  const cs = getComputedStyle(document.documentElement);
+  TOKENS.forEach(t => { colors[t] = cs.getPropertyValue(t).trim() || "#888"; });
+}
+function sizeCanvas() {
+  const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  canvas.width = Math.round(L * dpr);
+  canvas.height = Math.round(L * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function line(a, b) { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+
+function drawFootprint(x, y, hDeg, color, dashed) {
+  const c = toCanvas({ x, y });
+  const h = -hDeg * Math.PI / 180;   // canvas y is down
+  const half = ROBOT / 2 * SCALE;
+  ctx.save();
+  ctx.translate(c.x, c.y);
+  ctx.rotate(h);
+  ctx.strokeStyle = color; ctx.lineWidth = 2;
+  if (dashed) ctx.setLineDash([5, 4]);
+  ctx.globalAlpha = 0.14; ctx.fillStyle = color; ctx.fillRect(-half, -half, 2 * half, 2 * half);
+  ctx.globalAlpha = 1; ctx.strokeRect(-half, -half, 2 * half, 2 * half);
+  ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(half + 6, 0); ctx.stroke();   // heading
+  ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+  ctx.restore();
+}
+
+function draw() {
+  readColors();
+  ctx.clearRect(0, 0, L, L);
+  ctx.fillStyle = colors["--mat"]; ctx.fillRect(0, 0, L, L);
+
+  // 24 in foam tiles
+  ctx.strokeStyle = colors["--seam"]; ctx.lineWidth = 1;
+  for (let i = -HALF; i <= HALF; i += 24) {
+    line(toCanvas({ x: i, y: -HALF }), toCanvas({ x: i, y: HALF }));
+    line(toCanvas({ x: -HALF, y: i }), toCanvas({ x: HALF, y: i }));
+  }
+  // axes through the origin
+  ctx.strokeStyle = colors["--axis"]; ctx.lineWidth = 1.5;
+  line(toCanvas({ x: -HALF, y: 0 }), toCanvas({ x: HALF, y: 0 }));
+  line(toCanvas({ x: 0, y: -HALF }), toCanvas({ x: 0, y: HALF }));
+  ctx.fillStyle = colors["--muted"]; ctx.font = "12px system-ui, sans-serif";
+  ctx.textAlign = "right"; ctx.fillText("+X", L - 6, L / 2 - 6);
+  ctx.textAlign = "left"; ctx.fillText("+Y", L / 2 + 6, 14);
+
+  drawFootprint(state.start.x, state.start.y, state.start.h, colors["--start"], false);
+
+  // unselected paths first, selected on top
+  const order = state.paths.map((_, i) => i).filter(i => i !== state.selected);
+  if (state.paths[state.selected]) order.push(state.selected);
+  order.forEach(pi => {
+    const path = state.paths[pi];
+    const sel = pi === state.selected;
+    const color = sel ? colors["--accent"] : colors["--path"];
+    if (path.points.length >= 2) {
+      ctx.strokeStyle = color; ctx.lineWidth = sel ? 3 : 2;
+      ctx.beginPath();
+      for (let s = 0; s <= 100; s++) {
+        const p = toCanvas(bezierPoint(path.points, s / 100));
+        if (s === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+      // heading ticks along the path
+      ctx.lineWidth = 1.5; ctx.globalAlpha = 0.7;
+      for (let s = 0; s <= 10; s++) {
+        const t = s / 10;
+        const base = toCanvas(bezierPoint(path.points, t));
+        const rad = headingAt(path, t) * Math.PI / 180;
+        line(base, { x: base.x + Math.cos(rad) * 14, y: base.y - Math.sin(rad) * 14 });
+      }
+      ctx.globalAlpha = 1;
+    }
+    if (sel) {
+      // control polygon
+      ctx.strokeStyle = colors["--axis"]; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      path.points.forEach((p, i) => { const c = toCanvas(p); if (i === 0) ctx.moveTo(c.x, c.y); else ctx.lineTo(c.x, c.y); });
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    // handles: hollow ring = linked start point
+    path.points.forEach((p, i) => {
+      const c = toCanvas(p);
+      const last = i === path.points.length - 1;
+      ctx.beginPath(); ctx.arc(c.x, c.y, i === 0 || last ? 7 : 5, 0, Math.PI * 2);
+      if (i === 0) {
+        ctx.fillStyle = colors["--surface"]; ctx.fill();
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+      } else {
+        ctx.fillStyle = sel ? (last ? colors["--accent"] : colors["--surface"]) : colors["--path"]; ctx.fill();
+        if (sel && !last) { ctx.strokeStyle = colors["--accent"]; ctx.lineWidth = 2; ctx.stroke(); }
+      }
+    });
+  });
+
+  // where the chain ends, with the final heading
+  const end = finalPose();
+  if (end) drawFootprint(end.x, end.y, end.h, colors["--accent"], true);
+}
+
+function validPaths() { return state.paths.filter(p => p.points.length >= 2); }
+function finalPose() {
+  const v = validPaths();
+  if (!v.length) return null;
+  const last = v[v.length - 1];
+  const p = last.points[last.points.length - 1];
+  return { x: p.x, y: p.y, h: headingAt(last, 1) };
+}
+
+// ---------- interaction ----------
+let drag = null; // { pi, i }
+function canvasXY(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * (L / r.width), y: (e.clientY - r.top) * (L / r.height) };
+}
+function hitTest(cx, cy) {
+  const path = state.paths[state.selected];
+  if (!path) return null;
+  for (let i = path.points.length - 1; i >= 0; i--) {
+    const c = toCanvas(path.points[i]);
+    if (Math.hypot(c.x - cx, c.y - cy) <= 10) return { pi: state.selected, i };
+  }
+  return null;
+}
+function movePoint(hit, f) {
+  const pt = { x: round1(clampField(f.x)), y: round1(clampField(f.y)) };
+  if (hit.i > 0) { state.paths[hit.pi].points[hit.i] = pt; return; }
+  // Linked start point: move whatever it is linked to.
+  for (let k = hit.pi - 1; k >= 0; k--) {
+    const pts = state.paths[k].points;
+    if (pts.length) { pts[pts.length - 1] = pt; return; }
+  }
+  $("startX").value = pt.x; $("startY").value = pt.y;
+}
+canvas.addEventListener("pointerdown", e => {
+  const { x, y } = canvasXY(e);
+  const hit = hitTest(x, y);
+  if (hit) { drag = hit; canvas.setPointerCapture(e.pointerId); return; }
+  if (!state.paths.length) addPath(false);
+  const path = state.paths[state.selected];
+  const f = toField(x, y);
+  path.points.push({ x: round1(clampField(f.x)), y: round1(clampField(f.y)) });
+  edited();
+});
+canvas.addEventListener("pointermove", e => {
+  const { x, y } = canvasXY(e);
+  const f = toField(x, y);
+  $("readout").textContent = `cursor: x ${round1(f.x).toFixed(1)} in, y ${round1(f.y).toFixed(1)} in`;
+  if (drag) { movePoint(drag, f); edited(); }
+  else canvas.style.cursor = hitTest(x, y) ? "grab" : "crosshair";
+});
+canvas.addEventListener("pointerup", () => { drag = null; });
+canvas.addEventListener("pointercancel", () => { drag = null; });
+canvas.addEventListener("pointerleave", () => { if (!drag) $("readout").textContent = "cursor: off field"; });
+canvas.addEventListener("dblclick", e => {
+  const { x, y } = canvasXY(e);
+  const hit = hitTest(x, y);
+  if (hit && hit.i > 0) { state.paths[hit.pi].points.splice(hit.i, 1); edited(); }
+});
+
+// ---------- path list ----------
+function addPath(refresh = true) {
+  const a = anchorFor(state.paths.length);
+  state.paths.push({ points: [{ x: a.x, y: a.y }], heading: { mode: "tangent", a: 0, b: 0 } });
+  state.selected = state.paths.length - 1;
+  if (refresh) edited();
+}
+function renderList() {
+  const list = $("pathList");
+  list.innerHTML = "";
+  if (!state.paths.length) {
+    list.innerHTML = '<li class="empty">No paths yet. Press Add path, or click the field.</li>';
+    return;
+  }
+  state.paths.forEach((path, pi) => {
+    const li = document.createElement("li");
+    li.className = "path" + (pi === state.selected ? " sel" : "");
+    const h = path.heading;
+    const modes = MODES.map(m => `<option value="${m}"${h.mode === m ? " selected" : ""}>${m}</option>`).join("");
+    const aLabel = h.mode === "linear" ? "start°" : "heading°";
+    const needA = h.mode === "linear" || h.mode === "constant";
+    const needB = h.mode === "linear";
+    const pts = path.points.length;
+    li.innerHTML = `
+      <div class="path-head">
+        <button class="path-name" type="button" data-act="select" data-pi="${pi}">Path ${pi}${pi === state.selected ? " (selected)" : ""}</button>
+        <span class="path-meta">${pts} pt${pts === 1 ? "" : "s"} · ${pathLength(path).toFixed(1)} in</span>
+      </div>
+      <div class="row">
+        <label for="mode-${pi}">heading</label>
+        <select id="mode-${pi}" data-act="mode" data-pi="${pi}">${modes}</select>
+        ${needA ? `<label for="a-${pi}">${aLabel}</label><input id="a-${pi}" type="number" step="5" data-act="a" data-pi="${pi}" value="${h.a}">` : ""}
+        ${needB ? `<label for="b-${pi}">end°</label><input id="b-${pi}" type="number" step="5" data-act="b" data-pi="${pi}" value="${h.b}">` : ""}
+      </div>
+      <div class="row">
+        <button type="button" data-act="pop" data-pi="${pi}"${pts <= 1 ? " disabled" : ""}>Remove last point</button>
+        <button type="button" class="danger" data-act="delete" data-pi="${pi}">Delete path</button>
+      </div>`;
+    list.appendChild(li);
+  });
+  list.querySelectorAll("[data-act]").forEach(el => {
+    const pi = +el.dataset.pi, act = el.dataset.act;
+    if (el.tagName === "SELECT") {
+      el.addEventListener("change", () => { state.paths[pi].heading.mode = el.value; edited(); });
+    } else if (el.tagName === "INPUT") {
+      // Don't rebuild the list while typing, or the box loses focus.
+      el.addEventListener("input", () => { state.paths[pi].heading[act] = parseFloat(el.value) || 0; edited(false); });
+    } else {
+      el.addEventListener("click", () => {
+        if (act === "select") state.selected = pi;
+        else if (act === "pop") { if (state.paths[pi].points.length > 1) state.paths[pi].points.pop(); state.selected = pi; }
+        else if (act === "delete") {
+          state.paths.splice(pi, 1);
+          if (pi < state.selected || state.selected >= state.paths.length) state.selected = Math.max(0, state.selected - 1);
+        }
+        edited();
+      });
+    }
+  });
+}
+
+// ---------- java codegen (format matches PathAuto's PASTE block) ----------
+function fmt(v) { return Number.isInteger(v) ? v.toFixed(1) : String(v); }
+function genJava() {
+  const paths = validPaths();
+  const lines = [];
+  lines.push(`// Auto-generated by Path Planner. Field inches, heading degrees CCW.`);
+  lines.push(`localization.setStartingPose(new Pose2d(${fmt(state.start.x)}, ${fmt(state.start.y)}, ` +
+             `Rotation2d.fromDegrees(${fmt(state.start.h)})));`);
+  lines.push("");
+  paths.forEach((path, idx) => {
+    const cps = path.points.map(p => `        new Translation2d(${fmt(p.x)}, ${fmt(p.y)})`).join(",\n");
+    let headingCall;
+    switch (path.heading.mode) {
+      case "constant": headingCall = `.setConstantHeading(Math.toRadians(${fmt(path.heading.a)}))`; break;
+      case "linear":   headingCall = `.setLinearHeading(Math.toRadians(${fmt(path.heading.a)}), Math.toRadians(${fmt(path.heading.b)}))`; break;
+      case "reverse":  headingCall = `.setReverseTangentHeading()`; break;
+      default:         headingCall = `.setTangentHeading()`;
+    }
+    lines.push(`Path path${idx} = new Path(new BezierCurve(`);
+    lines.push(cps + "))");
+    lines.push(`        ${headingCall};`);
+  });
+  lines.push("");
+  if (paths.length) {
+    lines.push(`PathChain chain = new PathChain(${paths.map((_, i) => `path${i}`).join(", ")});`);
+    lines.push(`follower.followPath(chain);`);
+  } else {
+    lines.push(`// Add at least one path with 2+ control points.`);
+  }
+  return lines.join("\n");
+}
+
+// ---------- copy ----------
+function setStatus(msg) { $("copyStatus").textContent = msg; }
+function copyCode() {
+  const ta = $("code");
+  const fallback = () => {
+    ta.focus(); ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    setStatus(ok ? "Copied. Paste it into PathAuto between the PASTE markers."
+                 : "Text selected. Press Ctrl+C (Cmd+C on a Mac) to copy it.");
+  };
+  try {
+    navigator.clipboard.writeText(ta.value)
+      .then(() => setStatus("Copied. Paste it into PathAuto between the PASTE markers."))
+      .catch(fallback);
+  } catch (e) { fallback(); }
+}
+
+// ---------- glue ----------
+function edited(rerenderList = true) {
+  if (state.example) { state.example = false; }
+  refresh(rerenderList);
+  save();
+  setStatus("");
+}
+function refresh(rerenderList = true) {
+  state.start.x = parseFloat($("startX").value) || 0;
+  state.start.y = parseFloat($("startY").value) || 0;
+  state.start.h = parseFloat($("startH").value) || 0;
+  link();
+  if (rerenderList) renderList();
+  else document.querySelectorAll(".path-meta").forEach((el, pi) => {
+    const p = state.paths[pi];
+    if (p) el.textContent = `${p.points.length} pt${p.points.length === 1 ? "" : "s"} · ${pathLength(p).toFixed(1)} in`;
+  });
+  draw();
+  $("code").value = genJava();
+  const end = finalPose();
+  $("finalPose").textContent = end
+    ? `Chain ends at x ${end.x.toFixed(1)}, y ${end.y.toFixed(1)}, heading ${end.h.toFixed(1)}°`
+    : "";
+  $("exampleNote").hidden = !state.example;
+}
+
+let clearArmed = null;
+$("clearAll").addEventListener("click", () => {
+  const btn = $("clearAll");
+  if (!clearArmed) {
+    btn.textContent = "Click again to clear"; btn.classList.add("arm");
+    clearArmed = setTimeout(() => { clearArmed = null; btn.textContent = "Clear all"; btn.classList.remove("arm"); }, 3000);
+    return;
+  }
+  clearTimeout(clearArmed); clearArmed = null;
+  btn.textContent = "Clear all"; btn.classList.remove("arm");
+  state.paths = []; state.selected = 0;
+  edited();
+});
+$("addPath").addEventListener("click", () => addPath(true));
+$("copyBtn").addEventListener("click", copyCode);
+["startX", "startY", "startH"].forEach(id => $(id).addEventListener("input", () => edited(false)));
+
+// redraw when the theme or pixel density changes
+const darkQuery = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+if (darkQuery && darkQuery.addEventListener) darkQuery.addEventListener("change", draw);
+new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+window.addEventListener("resize", () => { sizeCanvas(); draw(); });
+
+// boot
+$("startX").value = state.start.x;
+$("startY").value = state.start.y;
+$("startH").value = state.start.h;
+sizeCanvas();
+refresh(true);
+</script>
+</body>
+</html>
